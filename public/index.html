@@ -221,6 +221,29 @@
         color: #7d0a0a;
       }
 
+      .badge-label {
+        background: #ddf4ff;
+        color: #0366d6;
+      }
+
+      .issue-meta-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        font-size: 0.75rem;
+        color: #57606a;
+        margin-top: 0.5rem;
+      }
+
+      .issue-meta-extra {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+        font-size: 0.75rem;
+        color: #57606a;
+        margin-top: 0.25rem;
+      }
+
       .empty-state {
         padding: 2rem;
         text-align: center;
@@ -231,6 +254,121 @@
         text-align: center;
         padding: 2rem;
         color: #57606a;
+      }
+
+      /* ── Tabs ── */
+      .tabs {
+        background: white;
+        border-bottom: 2px solid #d0d7de;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+      }
+
+      .tab-bar {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 0 1rem;
+        display: flex;
+      }
+
+      .tab-btn {
+        padding: 0.9rem 1.5rem;
+        background: none;
+        border: none;
+        border-bottom: 3px solid transparent;
+        margin-bottom: -2px;
+        color: #57606a;
+        font-size: 0.9rem;
+        font-weight: 500;
+        cursor: pointer;
+        border-radius: 0;
+        transition: color 0.15s;
+      }
+
+      .tab-btn:hover {
+        background: #f5f6f7;
+        color: #161b22;
+      }
+
+      .tab-btn.active {
+        color: #0969da;
+        border-bottom-color: #0969da;
+        background: none;
+      }
+
+      .tab-panel { display: none; }
+      .tab-panel.active { display: block; }
+
+      /* ── Hierarchy tree ── */
+      .hierarchy-panel {
+        background: white;
+        border-radius: 6px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        overflow: hidden;
+      }
+
+      .hierarchy-header {
+        padding: 1.5rem;
+        border-bottom: 1px solid #d0d7de;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .hierarchy-header h2 { font-size: 1rem; }
+
+      .tree-row {
+        display: flex;
+        align-items: center;
+        padding: 0.45rem 1rem 0.45rem 0;
+        border-bottom: 1px solid #f0f0f0;
+        gap: 0.4rem;
+      }
+
+      .tree-row:hover { background: #f5f6f7; }
+
+      .tree-toggle {
+        background: none;
+        border: none;
+        color: #57606a;
+        cursor: pointer;
+        font-size: 0.8rem;
+        padding: 1px 4px;
+        width: 20px;
+        flex-shrink: 0;
+        line-height: 1;
+        border-radius: 3px;
+      }
+
+      .tree-toggle:hover { background: #d0d7de; color: #161b22; }
+
+      .tree-spacer {
+        width: 20px;
+        flex-shrink: 0;
+        display: inline-block;
+      }
+
+      .tree-issue {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        flex: 1;
+        min-width: 0;
+      }
+
+      .tree-summary {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 0.875rem;
+      }
+
+      .tree-assignee {
+        font-size: 0.75rem;
+        color: #57606a;
+        white-space: nowrap;
+        flex-shrink: 0;
       }
 
       @media (max-width: 768px) {
@@ -250,7 +388,15 @@
       <p id="status">Loading data...</p>
     </header>
 
+    <nav class="tabs">
+      <div class="tab-bar">
+        <button class="tab-btn active" data-tab="search">🔍 Search</button>
+        <button class="tab-btn" data-tab="hierarchy">🌳 Hierarchy</button>
+      </div>
+    </nav>
+
     <div class="container">
+      <div class="tab-panel active" id="tab-search">
       <div class="search-panel">
         <div class="search-grid">
           <input
@@ -267,7 +413,7 @@
           <select id="statusFilter">
             <option value="">Filter by status...</option>
           </select>
-          <button id="searchBtn">Search</button>
+          <button id="clearBtn" style="background:#6e7681;">Clear</button>
         </div>
 
         <div class="stats" id="stats"></div>
@@ -280,6 +426,17 @@
         </div>
         <div class="issues-list" id="issuesList"></div>
       </div>
+      </div><!-- /tab-search -->
+
+      <div class="tab-panel" id="tab-hierarchy">
+        <div class="hierarchy-panel">
+          <div class="hierarchy-header">
+            <h2>Issue Hierarchy</h2>
+            <span id="hierarchyCount"></span>
+          </div>
+          <div id="hierarchyTree" style="max-height:700px;overflow-y:auto;"></div>
+        </div>
+      </div><!-- /tab-hierarchy -->
     </div>
 
     <script>
@@ -291,7 +448,7 @@
         searchInput: document.getElementById('searchInput'),
         searchField: document.getElementById('searchField'),
         statusFilter: document.getElementById('statusFilter'),
-        searchBtn: document.getElementById('searchBtn'),
+        clearBtn: document.getElementById('clearBtn'),
         stats: document.getElementById('stats'),
         issuesList: document.getElementById('issuesList'),
         resultsTitle: document.getElementById('resultsTitle'),
@@ -309,6 +466,7 @@
           ).toLocaleString()}`;
           loadStats();
           renderIssues();
+          renderHierarchy();
         } catch (error) {
           console.error('Failed to load data:', error);
           elements.status.textContent = 'Failed to load data';
@@ -360,14 +518,20 @@
           .map(
             (issue) => `
             <div class="issue">
-              <div class="issue-key">${issue.key}</div>
+              <div class="issue-key">${issue.key}${issue.parent ? ` <span style="font-weight:400;color:#57606a;">↑ ${escapeHtml(issue.parent)}</span>` : ''}</div>
               <div class="issue-summary">${escapeHtml(issue.summary)}</div>
               <div class="issue-meta">
                 <span class="badge badge-status">${issue.status}</span>
                 <span class="badge ${getIssueTypeClass(issue.issueType)}">${getIssueTypeIcon(issue.issueType)} ${issue.issueType}</span>
                 ${issue.priority ? `<span class="badge badge-priority">${issue.priority}</span>` : ''}
                 ${issue.assignee ? `<span>👤 ${escapeHtml(issue.assignee)}</span>` : '<span>Unassigned</span>'}
+                ${issue.team ? `<span>🏢 ${escapeHtml(issue.team)}</span>` : ''}
               </div>
+              ${(issue.labels && issue.labels.length > 0) || issue.startDate ? `
+              <div class="issue-meta-extra">
+                ${issue.startDate ? `<span>📅 Start: ${issue.startDate}</span>` : ''}
+                ${issue.labels && issue.labels.length > 0 ? issue.labels.map(l => `<span class="badge badge-label">${escapeHtml(l)}</span>`).join('') : ''}
+              </div>` : ''}
             </div>
           `
           )
@@ -443,11 +607,99 @@
         return div.innerHTML;
       }
 
-      // Event listeners
-      elements.searchBtn.addEventListener('click', search);
-      elements.searchInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') search();
+      // ── Hierarchy ──────────────────────────────────────────
+      function buildHierarchy() {
+        const issueMap = {};
+        const childrenOf = {};
+        for (const issue of allIssues) {
+          issueMap[issue.key] = issue;
+          childrenOf[issue.key] = [];
+        }
+        const roots = [];
+        for (const issue of allIssues) {
+          if (issue.parent && issueMap[issue.parent]) {
+            childrenOf[issue.parent].push(issue);
+          } else {
+            roots.push(issue);
+          }
+        }
+        // Epics first, then by key
+        const rank = t => (t || '').toLowerCase() === 'epic' ? 0 : 1;
+        roots.sort((a, b) => rank(a.issueType) - rank(b.issueType) || a.key.localeCompare(b.key));
+        for (const key of Object.keys(childrenOf)) {
+          childrenOf[key].sort((a, b) => a.key.localeCompare(b.key));
+        }
+        return { roots, childrenOf };
+      }
+
+      function renderHierarchyNode(issue, childrenOf, depth) {
+        const children = childrenOf[issue.key] || [];
+        const hasChildren = children.length > 0;
+        const cid = 'ch-' + issue.key;
+        const indent = depth * 22 + 12;
+        return `
+          <div>
+            <div class="tree-row" style="padding-left:${indent}px">
+              ${hasChildren
+                ? `<button class="tree-toggle" onclick="toggleNode('${cid}',this)" aria-expanded="true">&#9660;</button>`
+                : '<span class="tree-spacer"></span>'}
+              <div class="tree-issue">
+                <span class="issue-key" style="flex-shrink:0">${issue.key}</span>
+                <span class="badge ${getIssueTypeClass(issue.issueType)}" style="flex-shrink:0">${getIssueTypeIcon(issue.issueType)} ${issue.issueType}</span>
+                <span class="tree-summary">${escapeHtml(issue.summary)}</span>
+                <span class="badge badge-status" style="flex-shrink:0">${issue.status}</span>
+                ${issue.assignee ? `<span class="tree-assignee">&#128100; ${escapeHtml(issue.assignee)}</span>` : ''}
+              </div>
+            </div>
+            ${hasChildren ? `<div id="${cid}">${children.map(c => renderHierarchyNode(c, childrenOf, depth + 1)).join('')}</div>` : ''}
+          </div>`;
+      }
+
+      function renderHierarchy() {
+        const container = document.getElementById('hierarchyTree');
+        if (allIssues.length === 0) {
+          container.innerHTML = '<div class="empty-state">No issues loaded</div>';
+          document.getElementById('hierarchyCount').textContent = '';
+          return;
+        }
+        const { roots, childrenOf } = buildHierarchy();
+        container.innerHTML = roots.map(r => renderHierarchyNode(r, childrenOf, 0)).join('');
+        document.getElementById('hierarchyCount').textContent =
+          `${roots.length} root item${roots.length === 1 ? '' : 's'}`;
+      }
+
+      function toggleNode(cid, btn) {
+        const el = document.getElementById(cid);
+        if (!el) return;
+        const open = el.style.display !== 'none';
+        el.style.display = open ? 'none' : '';
+        btn.innerHTML = open ? '&#9654;' : '&#9660;';
+        btn.setAttribute('aria-expanded', String(!open));
+      }
+
+      // ── Tabs ──────────────────────────────────────────────────
+      function switchTab(name) {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + name));
+      }
+
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => switchTab(btn.dataset.tab));
       });
+
+      function clearFilters() {
+        elements.searchInput.value = '';
+        elements.searchField.value = 'all';
+        elements.statusFilter.value = '';
+        filteredIssues = [...allIssues];
+        elements.resultsTitle.textContent = 'All Issues';
+        renderIssues();
+      }
+
+      // Event listeners
+      elements.clearBtn.addEventListener('click', clearFilters);
+      elements.searchInput.addEventListener('input', search);
+      elements.searchField.addEventListener('change', search);
       elements.statusFilter.addEventListener('change', search);
 
       // Initial load

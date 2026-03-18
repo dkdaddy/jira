@@ -11,6 +11,9 @@ interface StoredData {
     updated: string;
     issueType: string;
     labels?: string[];
+    parent?: string;
+    startDate?: string;
+    team?: string;
   }>;
   lastUpdated: string;
   totalIssues: number;
@@ -37,6 +40,10 @@ export class DataStore {
         updated: string;
         issuetype: { name: string };
         labels?: string[];
+        parent?: { key: string; fields: { summary: string; issuetype: { name: string } } };
+        customfield_10015?: string;
+        customfield_10001?: { name: string } | string | null;
+        [key: string]: unknown;
       };
     }>
   ): void {
@@ -54,6 +61,13 @@ export class DataStore {
         updated: issue.fields.updated,
         issueType: issue.fields.issuetype?.name || 'Unknown',
         labels: issue.fields.labels,
+        parent: issue.fields.parent?.key,
+        startDate: issue.fields.customfield_10015 ?? undefined,
+        team: typeof issue.fields.customfield_10001 === 'object' && issue.fields.customfield_10001 !== null
+          ? (issue.fields.customfield_10001 as { name: string }).name
+          : typeof issue.fields.customfield_10001 === 'string'
+          ? issue.fields.customfield_10001
+          : undefined,
       }));
 
     this.data.lastUpdated = new Date().toISOString();

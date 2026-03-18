@@ -20,6 +20,15 @@ interface JiraIssue {
       name: string;
     };
     labels?: string[];
+    parent?: {
+      key: string;
+      fields: {
+        summary: string;
+        issuetype: { name: string };
+      };
+    };
+    customfield_10015?: string; // Start date
+    customfield_10001?: { name: string } | string | null; // Team
     customfield_10000?: string;
     [key: string]: unknown;
   };
@@ -78,6 +87,9 @@ export class JiraClient {
       'updated',
       'issuetype',
       'labels',
+      'parent',
+      'customfield_10015',
+      'customfield_10001',
     ];
 
     do {
