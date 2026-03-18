@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Jira Explorer</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
+          Ubuntu, Cantarell, sans-serif;
+        background: #f5f6f7;
+        color: #161b22;
+      }
+
+      header {
+        background: #0969da;
+        color: white;
+        padding: 1.5rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      }
+
+      header h1 {
+        font-size: 1.75rem;
+        margin-bottom: 0.5rem;
+      }
+
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 2rem 1rem;
+      }
+
+      .search-panel {
+        background: white;
+        padding: 1.5rem;
+        border-radius: 6px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        margin-bottom: 2rem;
+      }
+
+      .search-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr auto;
+        gap: 1rem;
+        margin-bottom: 1rem;
+      }
+
+      .search-grid input,
+      .search-grid select {
+        padding: 0.75rem;
+        border: 1px solid #d0d7de;
+        border-radius: 4px;
+        font-size: 0.875rem;
+      }
+
+      .search-grid input:focus,
+      .search-grid select:focus {
+        outline: none;
+        border-color: #0969da;
+        box-shadow: 0 0 0 3px rgba(9, 105, 218, 0.1);
+      }
+
+      button {
+        padding: 0.75rem 1rem;
+        background: #238636;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.875rem;
+        font-weight: 500;
+      }
+
+      button:hover {
+        background: #2ea043;
+      }
+
+      button:active {
+        background: #1f6feb;
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 1rem;
+        margin-top: 1rem;
+      }
+
+      .stat-card {
+        background: #f0f6fc;
+        border: 1px solid #d0d7de;
+        border-radius: 4px;
+        padding: 1rem;
+        text-align: center;
+      }
+
+      .stat-card .value {
+        font-size: 1.5rem;
+        font-weight: bold;
+        color: #0969da;
+      }
+
+      .stat-card .label {
+        font-size: 0.75rem;
+        color: #57606a;
+        margin-top: 0.5rem;
+        text-transform: uppercase;
+      }
+
+      .issues-panel {
+        background: white;
+        border-radius: 6px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
+      }
+
+      .issues-header {
+        padding: 1.5rem;
+        border-bottom: 1px solid #d0d7de;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .issues-header h2 {
+        font-size: 1rem;
+      }
+
+      .issues-list {
+        max-height: 600px;
+        overflow-y: auto;
+      }
+
+      .issue {
+        padding: 1rem 1.5rem;
+        border-bottom: 1px solid #d0d7de;
+        cursor: pointer;
+        transition: background 0.2s;
+      }
+
+      .issue:hover {
+        background: #f5f6f7;
+      }
+
+      .issue-key {
+        font-weight: 600;
+        color: #0969da;
+        font-size: 0.85rem;
+      }
+
+      .issue-summary {
+        margin: 0.5rem 0;
+        line-height: 1.4;
+      }
+
+      .issue-meta {
+        display: flex;
+        gap: 1rem;
+        font-size: 0.75rem;
+        color: #57606a;
+        margin-top: 0.5rem;
+      }
+
+      .badge {
+        display: inline-block;
+        padding: 0.25rem 0.5rem;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        font-weight: 500;
+      }
+
+      .badge-status {
+        background: #dafbe1;
+        color: #033a16;
+      }
+
+      .badge-type {
+        background: #fff8c5;
+        color: #332701;
+      }
+
+      .badge-priority {
+        background: #ffcccc;
+        color: #7d0a0a;
+      }
+
+      .empty-state {
+        padding: 2rem;
+        text-align: center;
+        color: #57606a;
+      }
+
+      .loading {
+        text-align: center;
+        padding: 2rem;
+        color: #57606a;
+      }
+
+      @media (max-width: 768px) {
+        .search-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .stats {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>📊 Jira Explorer</h1>
+      <p id="status">Loading data...</p>
+    </header>
+
+    <div class="container">
+      <div class="search-panel">
+        <div class="search-grid">
+          <input
+            type="text"
+            id="searchInput"
+            placeholder="Search issues..."
+          />
+          <select id="searchField">
+            <option value="all">All fields</option>
+            <option value="summary">Summary</option>
+            <option value="key">Key</option>
+            <option value="assignee">Assignee</option>
+          </select>
+          <select id="statusFilter">
+            <option value="">Filter by status...</option>
+          </select>
+          <button id="searchBtn">Search</button>
+        </div>
+
+        <div class="stats" id="stats"></div>
+      </div>
+
+      <div class="issues-panel">
+        <div class="issues-header">
+          <h2 id="resultsTitle">All Issues</h2>
+          <span id="resultCount">0 issues</span>
+        </div>
+        <div class="issues-list" id="issuesList"></div>
+      </div>
+    </div>
+
+    <script>
+      let allIssues = [];
+      let filteredIssues = [];
+
+      const elements = {
+        status: document.getElementById('status'),
+        searchInput: document.getElementById('searchInput'),
+        searchField: document.getElementById('searchField'),
+        statusFilter: document.getElementById('statusFilter'),
+        searchBtn: document.getElementById('searchBtn'),
+        stats: document.getElementById('stats'),
+        issuesList: document.getElementById('issuesList'),
+        resultsTitle: document.getElementById('resultsTitle'),
+        resultCount: document.getElementById('resultCount'),
+      };
+
+      async function loadData() {
+        try {
+          const response = await fetch('/api/issues');
+          const data = await response.json();
+          allIssues = data.issues || [];
+          filteredIssues = [...allIssues];
+          elements.status.textContent = `Last updated: ${new Date(
+            data.lastUpdated
+          ).toLocaleString()}`;
+          loadStats();
+          renderIssues();
+        } catch (error) {
+          console.error('Failed to load data:', error);
+          elements.status.textContent = 'Failed to load data';
+        }
+      }
+
+      async function loadStats() {
+        try {
+          const response = await fetch('/api/stats');
+          const stats = await response.json();
+
+          elements.stats.innerHTML = `
+            <div class="stat-card">
+              <div class="value">${stats.total}</div>
+              <div class="label">Total Issues</div>
+            </div>
+            ${Object.entries(stats.byStatus)
+              .map(
+                ([status, count]) => `
+              <div class="stat-card">
+                <div class="value">${count}</div>
+                <div class="label">${status}</div>
+              </div>
+            `
+              )
+              .join('')}
+          `;
+
+          // Populate status filter
+          const statuses = Object.keys(stats.byStatus);
+          elements.statusFilter.innerHTML =
+            '<option value="">Filter by status...</option>' +
+            statuses
+              .map((s) => `<option value="${s}">${s}</option>`)
+              .join('');
+        } catch (error) {
+          console.error('Failed to load stats:', error);
+        }
+      }
+
+      function renderIssues() {
+        if (filteredIssues.length === 0) {
+          elements.issuesList.innerHTML =
+            '<div class="empty-state">No issues found</div>';
+          return;
+        }
+
+        elements.issuesList.innerHTML = filteredIssues
+          .map(
+            (issue) => `
+            <div class="issue">
+              <div class="issue-key">${issue.key}</div>
+              <div class="issue-summary">${escapeHtml(issue.summary)}</div>
+              <div class="issue-meta">
+                <span class="badge badge-status">${issue.status}</span>
+                <span class="badge badge-type">${issue.issueType}</span>
+                ${issue.priority ? `<span class="badge badge-priority">${issue.priority}</span>` : ''}
+                ${issue.assignee ? `<span>👤 ${escapeHtml(issue.assignee)}</span>` : '<span>Unassigned</span>'}
+              </div>
+            </div>
+          `
+          )
+          .join('');
+
+        elements.resultCount.textContent =
+          `${filteredIssues.length} ${filteredIssues.length === 1 ? 'issue' : 'issues'}`;
+      }
+
+      async function search() {
+        const query = elements.searchInput.value.trim();
+        const field = elements.searchField.value;
+        const status = elements.statusFilter.value;
+
+        if (!query && !status) {
+          filteredIssues = [...allIssues];
+          elements.resultsTitle.textContent = 'All Issues';
+        } else if (query) {
+          try {
+            const params = new URLSearchParams({ q: query, field });
+            const response = await fetch(`/api/search?${params}`);
+            const data = await response.json();
+            filteredIssues = data.results;
+            elements.resultsTitle.textContent = `Search Results`;
+          } catch (error) {
+            console.error('Search failed:', error);
+          }
+        }
+
+        if (status) {
+          try {
+            const response = await fetch(`/api/status/${status}`);
+            const data = await response.json();
+            filteredIssues = filteredIssues.length > 0 
+              ? filteredIssues.filter(i => i.status === status)
+              : data.results;
+            elements.resultsTitle.textContent = `${status}`;
+          } catch (error) {
+            console.error('Filter failed:', error);
+          }
+        }
+
+        renderIssues();
+      }
+
+      function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+      }
+
+      // Event listeners
+      elements.searchBtn.addEventListener('click', search);
+      elements.searchInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') search();
+      });
+      elements.statusFilter.addEventListener('change', search);
+
+      // Initial load
+      loadData();
+    </script>
+  </body>
+</html>
