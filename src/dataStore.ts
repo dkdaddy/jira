@@ -14,6 +14,8 @@ interface StoredData {
     parent?: string;
     startDate?: string;
     team?: string;
+    colorway?: string;
+    storyPoints?: number;
   }>;
   lastUpdated: string;
   totalIssues: number;
@@ -45,7 +47,9 @@ export class DataStore {
         customfield_10001?: { name: string } | string | null;
         [key: string]: unknown;
       };
-    }>
+    }>,
+    colorwayFieldId?: string,
+    storyPointsFieldId?: string
   ): void {
     this.data.issues = issues
       .filter((issue) => issue && issue.fields && issue.fields.summary)
@@ -67,6 +71,12 @@ export class DataStore {
           ? (issue.fields.customfield_10001 as { name: string }).name
           : typeof issue.fields.customfield_10001 === 'string'
           ? issue.fields.customfield_10001
+          : undefined,
+        colorway: colorwayFieldId
+          ? (issue.fields[colorwayFieldId] as string | undefined) ?? undefined
+          : undefined,
+        storyPoints: storyPointsFieldId
+          ? (issue.fields[storyPointsFieldId] as number | undefined) ?? undefined
           : undefined,
       }));
 

@@ -226,6 +226,19 @@
         color: #0366d6;
       }
 
+      .badge-colorway {
+        background: #fff3cd;
+        color: #664d03;
+        font-style: italic;
+      }
+
+      .badge-sp {
+        background: #e8f4fd;
+        color: #0550ae;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+      }
+
       .issue-meta-row {
         display: flex;
         flex-wrap: wrap;
@@ -294,6 +307,21 @@
         border-bottom-color: #0969da;
         background: none;
       }
+
+      .refresh-btn {
+        margin-left: auto;
+        align-self: center;
+        padding: 0.4rem 0.9rem;
+        background: #0969da;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        font-size: 0.8rem;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      .refresh-btn:hover { background: #1a7fe6; }
+      .refresh-btn:disabled { background: #57606a; cursor: not-allowed; }
 
       .tab-panel { display: none; }
       .tab-panel.active { display: block; }
@@ -392,6 +420,7 @@
       <div class="tab-bar">
         <button class="tab-btn active" data-tab="search">🔍 Search</button>
         <button class="tab-btn" data-tab="hierarchy">🌳 Hierarchy</button>
+        <button class="refresh-btn" id="refreshBtn">🔄 Refresh from Jira</button>
       </div>
     </nav>
 
@@ -449,6 +478,7 @@
         searchField: document.getElementById('searchField'),
         statusFilter: document.getElementById('statusFilter'),
         clearBtn: document.getElementById('clearBtn'),
+        refreshBtn: document.getElementById('refreshBtn'),
         stats: document.getElementById('stats'),
         issuesList: document.getElementById('issuesList'),
         resultsTitle: document.getElementById('resultsTitle'),
@@ -525,7 +555,9 @@
                 <span class="badge ${getIssueTypeClass(issue.issueType)}">${getIssueTypeIcon(issue.issueType)} ${issue.issueType}</span>
                 ${issue.priority ? `<span class="badge badge-priority">${issue.priority}</span>` : ''}
                 ${issue.assignee ? `<span>👤 ${escapeHtml(issue.assignee)}</span>` : '<span>Unassigned</span>'}
+                ${issue.storyPoints != null ? `<span class="badge badge-sp">&#x1F4CA; ${issue.storyPoints} pts</span>` : ''}
                 ${issue.team ? `<span>🏢 ${escapeHtml(issue.team)}</span>` : ''}
+                ${issue.colorway ? `<span class="badge badge-colorway">🎨 ${escapeHtml(issue.colorway)}</span>` : ''}
               </div>
               ${(issue.labels && issue.labels.length > 0) || issue.startDate ? `
               <div class="issue-meta-extra">
@@ -649,6 +681,8 @@
                 <span class="tree-summary">${escapeHtml(issue.summary)}</span>
                 <span class="badge badge-status" style="flex-shrink:0">${issue.status}</span>
                 ${issue.assignee ? `<span class="tree-assignee">&#128100; ${escapeHtml(issue.assignee)}</span>` : ''}
+                ${issue.storyPoints != null ? `<span class="badge badge-sp" style="flex-shrink:0">&#x1F4CA; ${issue.storyPoints} pts</span>` : ''}
+                ${issue.colorway ? `<span class="badge badge-colorway" style="flex-shrink:0">🎨 ${escapeHtml(issue.colorway)}</span>` : ''}
               </div>
             </div>
             ${hasChildren ? `<div id="${cid}">${children.map(c => renderHierarchyNode(c, childrenOf, depth + 1)).join('')}</div>` : ''}
@@ -701,6 +735,23 @@
       elements.searchInput.addEventListener('input', search);
       elements.searchField.addEventListener('change', search);
       elements.statusFilter.addEventListener('change', search);
+
+      elements.refreshBtn.addEventListener('click', async () => {
+        elements.refreshBtn.disabled = true;
+        elements.refreshBtn.textContent = '⏳ Refreshing…';
+        elements.status.textContent = 'Refreshing from Jira…';
+        try {
+          const res = await fetch('/api/refresh', { method: 'POST' });
+          if (!res.ok) throw new Error(`Server error ${res.status}`);
+          await loadData();
+        } catch (err) {
+          console.error('Refresh failed:', err);
+          elements.status.textContent = 'Refresh failed — check console';
+        } finally {
+          elements.refreshBtn.disabled = false;
+          elements.refreshBtn.textContent = '🔄 Refresh from Jira';
+        }
+      });
 
       // Initial load
       loadData();

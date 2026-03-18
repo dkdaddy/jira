@@ -68,6 +68,16 @@ app.get('/api/health', (req: Request, res: Response) => {
   });
 });
 
+app.post('/api/refresh', async (req: Request, res: Response) => {
+  try {
+    await initializeData();
+    const data = dataStore.getData();
+    res.json({ status: 'ok', lastUpdated: data.lastUpdated, totalIssues: data.totalIssues });
+  } catch (error) {
+    res.status(500).json({ status: 'error', message: String(error) });
+  }
+});
+
 async function initializeData(): Promise<void> {
   try {
     const config = loadConfig();
@@ -75,10 +85,30 @@ async function initializeData(): Promise<void> {
 
     const jiraClient = new JiraClient(config.jiraUrl, config.email, config.apiToken);
 
-    console.log(`Fetching issues from project: ${config.projectKey}`);
-    const issues = await jiraClient.getProjectIssues(config.projectKey);
+    // Discover custom field IDs
+    const allFields = await jiraClient.getFields();
+    const colorwayField = allFields.find(
+      (f) => f.name.toLowerCase() === 'colorway'
+    );
+    const colorwayFieldId = colorwayField?.id;
+    if (colorwayFieldId) {
+      console.log(`Found colorway field: ${colorwayFieldId}`);
+    } else {
+      console.log('colorway field not found in this project');
+    }
 
-    dataStore.storeIssues(issues);
+    const storyPointsField = allFields.find(
+      (f) => f.name.toLowerCase() === 'story points' || f.name.toLowerCase() === 'story point estimate'
+    );
+    const storyPointsFieldId = storyPointsField?.id ?? 'customfield_10016';
+    console.log(`Using story points field: ${storyPointsFieldId} (${storyPointsField?.name ?? 'default'})`);
+
+    console.log(`Fetching issues from project: ${config.projectKey}`);
+    const extraFields = [storyPointsFieldId];
+    if (colorwayFieldId) extraFields.push(colorwayFieldId);
+    const issues = await jiraClient.getProjectIssues(config.projectKey, extraFields);
+
+    dataStore.storeIssues(issues, colorwayFieldId, storyPointsFieldId);
     console.log('Data loaded successfully');
   } catch (error) {
     console.error('Failed to initialize data:', error);

@@ -30,7 +30,7 @@ interface JiraIssue {
     customfield_10015?: string; // Start date
     customfield_10001?: { name: string } | string | null; // Team
     customfield_10000?: string;
-    [key: string]: unknown;
+    [key: string]: unknown; // allows dynamic custom field access
   };
 }
 
@@ -73,7 +73,12 @@ export class JiraClient {
     return data;
   }
 
-  async getProjectIssues(projectKey: string): Promise<JiraIssue[]> {
+  async getFields(): Promise<Array<{ id: string; name: string }>> {
+    const result = (await this.request('/field')) as Array<{ id: string; name: string }>;
+    return result;
+  }
+
+  async getProjectIssues(projectKey: string, extraFields: string[] = []): Promise<JiraIssue[]> {
     const issues: JiraIssue[] = [];
     let startAt = 0;
     const maxResults = 50;
@@ -90,6 +95,7 @@ export class JiraClient {
       'parent',
       'customfield_10015',
       'customfield_10001',
+      ...extraFields,
     ];
 
     do {
