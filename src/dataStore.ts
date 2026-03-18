@@ -35,7 +35,7 @@ export class DataStore {
         assignee?: { displayName: string };
         created: string;
         updated: string;
-        issueType: { name: string };
+        issuetype: { name: string };
         labels?: string[];
       };
     }>
@@ -52,7 +52,7 @@ export class DataStore {
         assignee: issue.fields.assignee?.displayName,
         created: issue.fields.created,
         updated: issue.fields.updated,
-        issueType: issue.fields.issueType?.name || 'Unknown',
+        issueType: issue.fields.issuetype?.name || 'Unknown',
         labels: issue.fields.labels,
       }));
 

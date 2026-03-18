@@ -16,7 +16,7 @@ interface JiraIssue {
     };
     created: string;
     updated: string;
-    issueType: {
+    issuetype: {
       name: string;
     };
     labels?: string[];

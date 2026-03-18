@@ -180,9 +180,40 @@
         color: #033a16;
       }
 
-      .badge-type {
-        background: #fff8c5;
-        color: #332701;
+      .badge-type-epic {
+        background: #7057ff;
+        color: #ffffff;
+        font-weight: 600;
+      }
+
+      .badge-type-story {
+        background: #36b37e;
+        color: #ffffff;
+        font-weight: 600;
+      }
+
+      .badge-type-bug {
+        background: #e5534b;
+        color: #ffffff;
+        font-weight: 600;
+      }
+
+      .badge-type-task {
+        background: #0969da;
+        color: #ffffff;
+        font-weight: 600;
+      }
+
+      .badge-type-subtask {
+        background: #57606a;
+        color: #ffffff;
+        font-weight: 600;
+      }
+
+      .badge-type-default {
+        background: #d0d7de;
+        color: #161b22;
+        font-weight: 600;
       }
 
       .badge-priority {
@@ -333,7 +364,7 @@
               <div class="issue-summary">${escapeHtml(issue.summary)}</div>
               <div class="issue-meta">
                 <span class="badge badge-status">${issue.status}</span>
-                <span class="badge badge-type">${issue.issueType}</span>
+                <span class="badge ${getIssueTypeClass(issue.issueType)}">${getIssueTypeIcon(issue.issueType)} ${issue.issueType}</span>
                 ${issue.priority ? `<span class="badge badge-priority">${issue.priority}</span>` : ''}
                 ${issue.assignee ? `<span>👤 ${escapeHtml(issue.assignee)}</span>` : '<span>Unassigned</span>'}
               </div>
@@ -380,6 +411,30 @@
         }
 
         renderIssues();
+      }
+
+      function getIssueTypeClass(type) {
+        switch ((type || '').toLowerCase()) {
+          case 'epic':    return 'badge badge-type-epic';
+          case 'story':   return 'badge badge-type-story';
+          case 'bug':     return 'badge badge-type-bug';
+          case 'task':    return 'badge badge-type-task';
+          case 'sub-task':
+          case 'subtask': return 'badge badge-type-subtask';
+          default:        return 'badge badge-type-default';
+        }
+      }
+
+      function getIssueTypeIcon(type) {
+        switch ((type || '').toLowerCase()) {
+          case 'epic':    return '⚡';
+          case 'story':   return '📖';
+          case 'bug':     return '🐛';
+          case 'task':    return '✅';
+          case 'sub-task':
+          case 'subtask': return '↳';
+          default:        return '📋';
+        }
       }
 
       function escapeHtml(text) {
