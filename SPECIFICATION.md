@@ -217,10 +217,20 @@ The system uses `field-mappings.yaml` to abstract Jira's field complexity:
       "key": "PLAT-123",
       "fields": {
         "summary": "Implement caching",
-        "customfield_10016": 5,  // Story points
-        "customfield_10001": { "value": "Platform Team" },  // Team custom field
+        "description": "Add Redis caching layer",
+        "issuetype": { "name": "Story" },
+        "priority": { "name": "High" },
+        "customfield_10001": { "value": "Platform Team" },  // Team
+        "customfield_10016": 8,  // Estimate
+        "customfield_10020": "M",  // T-shirt size
+        "customfield_10014": "Platform Modernization",  // Epic name
+        "customfield_10025": "Q2 2026",  // Quarter
+        "assignee": { "displayName": "Alice" },
+        "customfield_10030": { "displayName": "Bob" },  // Eng lead
         "status": { "name": "In Progress" },
-        "assignee": { "displayName": "Alice" }
+        "duedate": "2026-05-15",  // Due date
+        "customfield_10040": "2026-04-30",  // Beta date
+        "customfield_10015": "2026-03-01"  // Start date
       }
     }
     
@@ -228,21 +238,31 @@ The system uses `field-mappings.yaml` to abstract Jira's field complexity:
     {
       "key": "PLAT-123",
       "summary": "Implement caching",
-      "storyPoints": 5,
+      "description": "Add Redis caching layer",
+      "type": "Story",
+      "priority": "High",
       "team": "Platform Team",
+      "estimate": 8,
+      "tShirtSize": "M",
+      "epicName": "Platform Modernization",
+      "quarter": "Q2 2026",
+      "assignee": "Alice",
+      "engLead": "Bob",
       "status": "In Progress",
-      "assignee": "Alice"
+      "dueDate": "2026-05-15",
+      "betaDate": "2026-04-30",
+      "startDate": "2026-03-01"
     }
     ```
 3.  **Handle Missing Fields:** If a configured field doesn't exist in Jira, log a warning and use `null` or configured default.
 4.  **Type Coercion:** Apply appropriate type conversions:
     - **Dates:** ISO 8601 strings → Date objects
     - **Numbers:** Parse story points, numeric custom fields
-    - **Arrays:** Multi-select fields, labels
+    - **Arrays:** Multi-select fields
     - **Nested Objects:** Extract nested paths like `status.name`, `assignee.displayName`
 
 **Benefits:**
-- UI code uses consistent logical names (`storyPoints`, `team`) instead of cryptic IDs.
+- UI code uses consistent logical names (`estimate`, `team`, `engLead`) instead of cryptic IDs.
 - Easy to adapt when Jira custom field IDs change.
 - Configuration-driven: no code changes needed for new fields.
 
@@ -278,7 +298,7 @@ Maps individual issues to Team → Group → Org structure:
 4.  **Orphan Handling:** Issues not matching any team go to "Unassigned" bucket
 
 **Roll-up Aggregations:**
-- **Story Points:** Sum all issue story points within team/group/org
+- **Estimate:** Sum all issue estimates within team/group/org
 - **Task Count:** Count of issues
 - **Completion %:** `(closed issues / total issues) * 100`
 - **Health Distribution:** Count of red/yellow/green issues
@@ -296,8 +316,8 @@ Maps individual issues to Team → Group → Org structure:
           id: "red",
           name: "Red",
           metrics: {
-            totalPoints: 45,
-            completedPoints: 28,
+            totalEstimate: 45,
+            completedEstimate: 28,
             completionPct: 62.2,
             issueCount: 15,
             healthCounts: { red: 1, yellow: 4, green: 10 }
@@ -307,8 +327,8 @@ Maps individual issues to Team → Group → Org structure:
           id: "green",
           name: "Green",
           metrics: {
-            totalPoints: 52,
-            completedPoints: 40,
+            totalEstimate: 52,
+            completedEstimate: 40,
             completionPct: 76.9,
             issueCount: 18,
             healthCounts: { red: 0, yellow: 3, green: 15 }
@@ -318,8 +338,8 @@ Maps individual issues to Team → Group → Org structure:
           id: "blue",
           name: "Blue",
           metrics: {
-            totalPoints: 38,
-            completedPoints: 22,
+            totalEstimate: 38,
+            completedEstimate: 22,
             completionPct: 57.9,
             issueCount: 12,
             healthCounts: { red: 2, yellow: 2, green: 8 }
@@ -327,8 +347,8 @@ Maps individual issues to Team → Group → Org structure:
         }
       ],
       metrics: {  // Rolled up from UI teams
-        totalPoints: 135,
-        completedPoints: 90,
+        totalEstimate: 135,
+        completedEstimate: 90,
         completionPct: 66.7,
         issueCount: 45
       }
@@ -341,8 +361,8 @@ Maps individual issues to Team → Group → Org structure:
           id: "pink",
           name: "Pink",
           metrics: {
-            totalPoints: 60,
-            completedPoints: 45,
+            totalEstimate: 60,
+            completedEstimate: 45,
             completionPct: 75.0,
             issueCount: 20,
             healthCounts: { red: 1, yellow: 5, green: 14 }
@@ -352,8 +372,8 @@ Maps individual issues to Team → Group → Org structure:
           id: "white",
           name: "White",
           metrics: {
-            totalPoints: 72,
-            completedPoints: 50,
+            totalEstimate: 72,
+            completedEstimate: 50,
             completionPct: 69.4,
             issueCount: 25,
             healthCounts: { red: 2, yellow: 6, green: 17 }
@@ -363,8 +383,8 @@ Maps individual issues to Team → Group → Org structure:
           id: "black",
           name: "Black",
           metrics: {
-            totalPoints: 55,
-            completedPoints: 38,
+            totalEstimate: 55,
+            completedEstimate: 38,
             completionPct: 69.1,
             issueCount: 18,
             healthCounts: { red: 0, yellow: 4, green: 14 }
@@ -372,8 +392,8 @@ Maps individual issues to Team → Group → Org structure:
         }
       ],
       metrics: {  // Rolled up from Server teams
-        totalPoints: 187,
-        completedPoints: 133,
+        totalEstimate: 187,
+        completedEstimate: 133,
         completionPct: 71.1,
         issueCount: 63
       }
@@ -386,8 +406,8 @@ Maps individual issues to Team → Group → Org structure:
           id: "london",
           name: "London",
           metrics: {
-            totalPoints: 42,
-            completedPoints: 30,
+            totalEstimate: 42,
+            completedEstimate: 30,
             completionPct: 71.4,
             issueCount: 14,
             healthCounts: { red: 1, yellow: 3, green: 10 }
@@ -397,8 +417,8 @@ Maps individual issues to Team → Group → Org structure:
           id: "new-york",
           name: "New York",
           metrics: {
-            totalPoints: 48,
-            completedPoints: 36,
+            totalEstimate: 48,
+            completedEstimate: 36,
             completionPct: 75.0,
             issueCount: 16,
             healthCounts: { red: 0, yellow: 2, green: 14 }
@@ -406,16 +426,16 @@ Maps individual issues to Team → Group → Org structure:
         }
       ],
       metrics: {  // Rolled up from Network Connectivity teams
-        totalPoints: 90,
-        completedPoints: 66,
+        totalEstimate: 90,
+        completedEstimate: 66,
         completionPct: 73.3,
         issueCount: 30
       }
     }
   ],
   metrics: {  // Rolled up from all groups in Applications org
-    totalPoints: 412,
-    completedPoints: 289,
+    totalEstimate: 412,
+    completedEstimate: 289,
     completionPct: 70.1,
     issueCount: 138
   }
@@ -442,10 +462,10 @@ Maps issues to Initiative → Sub-Initiative → Goal hierarchy using the initia
 4.  **Unassigned Handling:** Issues without initiative field go to "No Initiative" view
 
 **Roll-up Aggregations:**
-- **Progress:** Weighted by story points: `sum(completed_points) / sum(total_points)`
+- **Progress:** Weighted by estimate: `sum(completed_estimate) / sum(total_estimate)`
 - **Budget:** Sum of custom `costCenter` field values
 - **At Risk:** Count of issues with `healthStatus === 'red'`
-- **Timeline:** Earliest `startDate` and latest `targetDate` across all issues
+- **Timeline:** Earliest `startDate` and latest `dueDate` across all issues
 
 **Example Output:**
 ```javascript
@@ -460,8 +480,8 @@ Maps issues to Initiative → Sub-Initiative → Goal hierarchy using the initia
           id: "office-hong-kong",
           name: "office in Hong Kong",
           metrics: {
-            totalPoints: 85,
-            completedPoints: 60,
+            totalEstimate: 85,
+            completedEstimate: 60,
             progress: 70.6,
             issueCount: 28,
             atRisk: 3,
@@ -470,8 +490,8 @@ Maps issues to Initiative → Sub-Initiative → Goal hierarchy using the initia
         }
       ],
       metrics: {  // Rolled up from expand Asia initiatives
-        totalPoints: 85,
-        completedPoints: 60,
+        totalEstimate: 85,
+        completedEstimate: 60,
         progress: 70.6,
         issueCount: 28,
         atRisk: 3,
@@ -486,8 +506,8 @@ Maps issues to Initiative → Sub-Initiative → Goal hierarchy using the initia
           id: "office-paris",
           name: "office in Paris",
           metrics: {
-            totalPoints: 120,
-            completedPoints: 85,
+            totalEstimate: 120,
+            completedEstimate: 85,
             progress: 70.8,
             issueCount: 42,
             atRisk: 5,
@@ -498,8 +518,8 @@ Maps issues to Initiative → Sub-Initiative → Goal hierarchy using the initia
           id: "office-london",
           name: "office in London",
           metrics: {
-            totalPoints: 95,
-            completedPoints: 72,
+            totalEstimate: 95,
+            completedEstimate: 72,
             progress: 75.8,
             issueCount: 35,
             atRisk: 2,
@@ -508,8 +528,8 @@ Maps issues to Initiative → Sub-Initiative → Goal hierarchy using the initia
         }
       ],
       metrics: {  // Rolled up from expand Europe initiatives
-        totalPoints: 215,
-        completedPoints: 157,
+        totalEstimate: 215,
+        completedEstimate: 157,
         progress: 73.0,
         issueCount: 77,
         atRisk: 7,
@@ -521,8 +541,8 @@ Maps issues to Initiative → Sub-Initiative → Goal hierarchy using the initia
       name: "expand Africa",
       initiatives: [],
       metrics: {
-        totalPoints: 0,
-        completedPoints: 0,
+        totalEstimate: 0,
+        completedEstimate: 0,
         progress: 0,
         issueCount: 0,
         atRisk: 0,
@@ -531,8 +551,8 @@ Maps issues to Initiative → Sub-Initiative → Goal hierarchy using the initia
     }
   ],
   metrics: {  // Rolled up from all sub-initiatives in Grow Business goal
-    totalPoints: 300,
-    completedPoints: 217,
+    totalEstimate: 300,
+    completedEstimate: 217,
     progress: 72.3,
     issueCount: 105,
     atRisk: 10,
@@ -574,7 +594,7 @@ function detectCycles(issueKey, visited = new Set()) {
 - **Cross-Project:** Can span multiple Jira projects if parent links exist
 
 **Roll-up Aggregations:**
-- **Story Points:** Sum all descendant story points
+- **Estimate:** Sum all descendant estimates
 - **Task Count:** Count of all descendant issues
 - **Completion %:** `(closed descendants / total descendants) * 100`
 - **Health Propagation:** Parent inherits worst health status from any child
@@ -597,8 +617,8 @@ function detectCycles(issueKey, visited = new Set()) {
           issueType: "Task",
           children: [],
           metrics: {
-            totalPoints: 5,
-            completedPoints: 5,
+            totalEstimate: 5,
+            completedEstimate: 5,
             completionPct: 100,
             issueCount: 1,
             healthStatus: "green"
@@ -610,8 +630,8 @@ function detectCycles(issueKey, visited = new Set()) {
           issueType: "Task",
           children: [],
           metrics: {
-            totalPoints: 8,
-            completedPoints: 3,
+            totalEstimate: 8,
+            completedEstimate: 3,
             completionPct: 37.5,
             issueCount: 1,
             healthStatus: "yellow"
@@ -619,8 +639,8 @@ function detectCycles(issueKey, visited = new Set()) {
         }
       ],
       metrics: {  // Rolled up from child tasks
-        totalPoints: 13,
-        completedPoints: 8,
+        totalEstimate: 13,
+        completedEstimate: 8,
         completionPct: 61.5,
         issueCount: 3,
         healthStatus: "yellow"  // Inherited from worst child
@@ -632,8 +652,8 @@ function detectCycles(issueKey, visited = new Set()) {
       issueType: "Story",
       children: [],
       metrics: {
-        totalPoints: 21,
-        completedPoints: 21,
+        totalEstimate: 21,
+        completedEstimate: 21,
         completionPct: 100,
         issueCount: 1,
         healthStatus: "green"
@@ -641,8 +661,8 @@ function detectCycles(issueKey, visited = new Set()) {
     }
   ],
   metrics: {  // Rolled up from all descendants
-    totalPoints: 34,
-    completedPoints: 29,
+    totalEstimate: 34,
+    completedEstimate: 29,
     completionPct: 85.3,
     issueCount: 5,
     healthStatus: "yellow"
@@ -707,21 +727,23 @@ Maps logical UI field names to Jira field paths:
 key: "key"
 summary: "summary"
 description: "description"
+type: "issuetype.name"
 status: "status.name"
 priority: "priority.name"
 assignee: "assignee.displayName"
-reporter: "reporter.displayName"
 created: "created"
 updated: "updated"
+dueDate: "duedate"
 
-# Custom fields (Jira Cloud defaults - adjust IDs for your instance)
-storyPoints: "customfield_10016"
-sprint: "customfield_10020"
-epicLink: "customfield_10014"
+# Custom fields (adjust IDs for your Jira instance)
 team: "customfield_10001.value"
+estimate: "customfield_10016"
+tShirtSize: "customfield_10020"
+epicName: "customfield_10014"
+quarter: "customfield_10025"
+engLead: "customfield_10030.displayName"
 startDate: "customfield_10015"
-targetDate: "customfield_10017"
-labels: "labels"
+betaDate: "customfield_10040"
 ```
 
 ### `config/org.yaml`
@@ -800,8 +822,8 @@ dashboards:
 ---
 
 ## 7. Suggested Dashboards to Build
-1.  **Executive Portfolio:** Grouped by Initiative. Shows % completion and "target date" vs "estimated completion."
-2.  **Squad Health:** Grouped by Team. Shows current sprint velocity, bug count, and stale tickets.
+1.  **Executive Portfolio:** Grouped by Initiative. Shows % completion and "due date" vs "estimated completion."
+2.  **Squad Health:** Grouped by Team. Shows current quarter velocity, bug count, and stale tickets.
 3.  **Dependency Map:** Filters for "Blocked" tickets. Shows which Team is blocking another Team.
 
 ---
