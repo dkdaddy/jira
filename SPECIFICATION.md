@@ -15,6 +15,10 @@ A high-performance, **offline-first** Jira reporting tool that runs as a Node.js
 * **Database:** None. The Filesystem (`/cache/*.json`) is the source of truth.
 * **Cache Format:** Timestamped JSON files (`cache/YYYY-MM-DD_HH-mm-ss/{project_key}.json`)
 * **Field Retrieval:** Fetch ALL available fields from Jira (standard + custom)
+* **Configuration Format:** YAML for all configuration files (human-readable, supports comments)
+* **Secrets Management:** Environment variables for credentials; never commit secrets to YAML files
+* **Scale Limits:** Optimized for up to 10,000 issues
+* **Browser Support:** Modern browsers with ES2020+ support (Chrome 90+, Firefox 88+, Safari 14+)
 
 ---
 
@@ -38,7 +42,8 @@ Upon execution, the server must:
     * Create timestamped directory: `cache/YYYY-MM-DD_HH-mm-ss/`
     * Save each project as: `cache/YYYY-MM-DD_HH-mm-ss/{project_key}.json`
     * Update `cache/meta.json` with current timestamp and snapshot location.
-8.  **Rate Limiting:** Implement 100ms delay between API bursts to avoid Atlassian 429 errors.
+8.  **Rate Limiting:** Implement exponential backoff (starting at 100ms) between API bursts to avoid Atlassian 429 errors.
+9.  **Error Recovery:** On sync failure, preserve previous snapshot and log error details for manual intervention.
 
 ### 3.1.1 Incremental Sync Strategy
 The system maintains state across runs to minimize API calls:
@@ -63,7 +68,16 @@ The system maintains state across runs to minimize API calls:
 - **Deleted Issues:** Compare current fetch with previous snapshot; issues not in current result set but marked deleted in API are flagged.
 - **Field Schema Changes:** Re-fetch field definitions if custom fields have been added/removed.
 - **Time Zone Handling:** Always use UTC ISO 8601 format for timestamps.
-- **Clock Skew:** Subtract 1 minute from `lastSync` when querying to avoid missing issues due to clock differences.
+- **Clock Skew:** Subtract dynamic buffer (max of 60s or 2x last sync duration) from `lastSync` to avoid missing issues.
+- **Long-Running Syncs:** If sync exceeds 5 minutes, use overlap buffer of sync_duration * 2 to ensure no missed updates.
+- **Eventual Consistency:** Jira's search index may lag; buffer compensates for replication delays.
+
+**Clock Skew Calculation:**
+```javascript
+const lastSyncDuration = meta.syncDuration || 60; // seconds
+const bufferSeconds = Math.max(60, lastSyncDuration * 2);
+const safeLastSync = new Date(meta.lastSync.getTime() - bufferSeconds * 1000);
+```
 
 **Example JQL:**
 ```jql
@@ -99,6 +113,17 @@ async function fetchAllIssues(jql) {
       fields: "*all"  // Fetch ALL fields
     });
     
+    // Edge case: empty result set
+    if (response.total === 0) {
+      console.log('No issues found matching JQL query');
+      return [];
+    }
+    
+    // Edge case: API returned no issues on first page
+    if (response.issues.length === 0 && startAt === 0) {
+      throw new Error('Jira API returned 0 issues - check JQL syntax and permissions');
+    }
+    
     allIssues.push(...response.issues);
     
     // Progress logging
@@ -109,9 +134,15 @@ async function fetchAllIssues(jql) {
       break;
     }
     
+    // Edge case: API changed total mid-pagination (rare but possible)
+    if (allIssues.length > response.total) {
+      console.warn('Warning: Issue count exceeded total - Jira data changed during sync');
+      break;
+    }
+    
     startAt += maxResults;
     
-    // Rate limiting
+    // Rate limiting with exponential backoff
     await sleep(100);
   }
   
@@ -127,10 +158,15 @@ async function fetchAllIssues(jql) {
 
 ### 3.2 The API Endpoints
 * `GET /api/config`: Merges and returns `dashboards.yaml`, `org.yaml`, and `initiatives.yaml`.
-* `GET /api/data`: Streams the combined JSON cache from disk to the browser.
+* `GET /api/data`: Streams the combined JSON cache from disk to the browser (paginated for large datasets).
+* `GET /api/data?limit=1000&offset=0`: Paginated data endpoint for datasets > 5000 issues.
 * `GET /api/snapshots`: Lists all available timestamped snapshots.
 * `GET /api/snapshots/:timestamp`: Loads data from a specific historical snapshot.
 * `GET /api/fields`: Returns field mapping configuration from `field-mappings.yaml`.
+* `GET /api/health`: Returns sync status, cache age, last error (if any).
+* `GET /api/health/jira`: Tests Jira connectivity (can we reach the API?).
+* `GET /api/export/csv`: Exports current filtered view as CSV.
+* `GET /api/export/json`: Exports current filtered view as JSON.
 * `GET /`: Serves `public/index.html`.
 
 ### 3.3 Cache Structure & Metadata
@@ -157,7 +193,10 @@ cache/
   "snapshotPath": "cache/2026-03-19_14-30-00",
   "projects": ["PLAT", "MOBILE", "DATA"],
   "issueCount": 1547,
-  "syncDuration": 23.4
+  "syncDuration": 23.4,
+  "syncType": "incremental",
+  "lastError": null,
+  "cacheSize": "12.4MB"
 }
 ```
 
@@ -179,7 +218,9 @@ The system uses `field-mappings.yaml` to abstract Jira's field complexity:
       "fields": {
         "summary": "Implement caching",
         "customfield_10016": 5,  // Story points
-        "customfield_10001": { "value": "Platform Team" }
+        "customfield_10001": { "value": "Platform Team" },  // Team custom field
+        "status": { "name": "In Progress" },
+        "assignee": { "displayName": "Alice" }
       }
     }
     
@@ -188,11 +229,17 @@ The system uses `field-mappings.yaml` to abstract Jira's field complexity:
       "key": "PLAT-123",
       "summary": "Implement caching",
       "storyPoints": 5,
-      "team": "Platform Team"
+      "team": "Platform Team",
+      "status": "In Progress",
+      "assignee": "Alice"
     }
     ```
-3.  **Handle Missing Fields:** If a configured field doesn't exist in Jira, log a warning and use `null`.
-4.  **Type Coercion:** Apply appropriate type conversions (dates, numbers, nested objects).
+3.  **Handle Missing Fields:** If a configured field doesn't exist in Jira, log a warning and use `null` or configured default.
+4.  **Type Coercion:** Apply appropriate type conversions:
+    - **Dates:** ISO 8601 strings → Date objects
+    - **Numbers:** Parse story points, numeric custom fields
+    - **Arrays:** Multi-select fields, labels
+    - **Nested Objects:** Extract nested paths like `status.name`, `assignee.displayName`
 
 **Benefits:**
 - UI code uses consistent logical names (`storyPoints`, `team`) instead of cryptic IDs.
@@ -502,6 +549,24 @@ Maps issues using Jira's native parent-child relationships to build a dynamic hi
 2.  **Recursive Traversal:** Walk up the parent chain to find root issues (epics, stories without parents)
 3.  **Multi-Level Support:** Automatically builds tree of arbitrary depth (Epic → Story → Task → Subtask)
 4.  **Orphan Handling:** Issues without parents appear as root-level nodes
+5.  **Cycle Detection:** Detect and break circular parent references; log warnings for data quality issues
+
+**Edge Case Handling:**
+```javascript
+// Cycle detection algorithm
+function detectCycles(issueKey, visited = new Set()) {
+  if (visited.has(issueKey)) {
+    console.error(`Circular parent reference detected: ${Array.from(visited).join(' → ')} → ${issueKey}`);
+    return true;
+  }
+  visited.add(issueKey);
+  const parent = getParent(issueKey);
+  if (parent) {
+    return detectCycles(parent, visited);
+  }
+  return false;
+}
+```
 
 **Hierarchy Characteristics:**
 - **Dynamic Structure:** No YAML configuration required; hierarchy emerges from Jira links
@@ -597,6 +662,30 @@ The UI must parse `dashboards.yaml` to generate a dynamic navigation bar. Switch
 * **Search-as-you-type:** A global input that filters the current view's `issue.key` and `issue.fields.summary`.
 * **Multi-Select Widgets:** Dropdowns for Status, Priority, and Team as defined in the YAML.
 * **Health Formatting:** Rows where `healthStatus === 'red'` must have a distinct background color.
+* **Export Buttons:** CSV and JSON export for current filtered view.
+* **Refresh Indicator:** Visual timestamp showing cache age (e.g., "Last updated: 2 hours ago").
+
+### 5.3 Client-Side Caching & Performance
+**Caching Strategy:**
+```javascript
+// HTTP caching headers
+app.get('/api/data', (req, res) => {
+  const etag = generateETag(cacheData);
+  res.setHeader('ETag', etag);
+  res.setHeader('Cache-Control', 'public, max-age=300');  // 5 minutes
+  
+  if (req.headers['if-none-match'] === etag) {
+    return res.status(304).end();  // Not Modified
+  }
+  
+  res.json(cacheData);
+});
+```
+
+**UI Cache Indicators:**
+- Display snapshot timestamp in header: "Data as of: Mar 19, 2026 2:30 PM"
+- "Refresh" button forces cache bypass: `fetch('/api/data', { cache: 'reload' })`
+- Stale data warning if cache > 24 hours old
 
 ---
 
@@ -606,121 +695,106 @@ The UI must parse `dashboards.yaml` to generate a dynamic navigation bar. Switch
 Defines which Jira projects to sync:
 ```yaml
 projects:
-  - key: "PLAT"
-    name: "Platform Engineering"
-  - key: "MOBILE"
-    name: "Mobile Apps"
-  - key: "DATA"
-    name: "Data Platform"
+  - PLAT
+  - MOBILE
+  - DATA
 ```
 
 ### `config/field-mappings.yaml`
-Maps logical UI field names to Jira standard and custom fields:
+Maps logical UI field names to Jira field paths:
 ```yaml
-field_mappings:
-  # Standard fields (no mapping needed, listed for reference)
-  key: "key"
-  summary: "summary"
-  description: "description"
-  status: "status.name"
-  priority: "priority.name"
-  assignee: "assignee.displayName"
-  reporter: "reporter.displayName"
-  created: "created"
-  updated: "updated"
-  
-  # Custom field mappings (Jira Cloud defaults)
-  storyPoints: "customfield_10016"
-  sprint: "customfield_10020"
-  epicLink: "customfield_10014"
-  team: "customfield_10001"
-  startDate: "customfield_10015"
-  targetDate: "customfield_10017"
-  
-  # Additional custom fields
-  costCenter: "customfield_12345"
-  technicalOwner: "customfield_12346"
-  
+# Standard fields
+key: "key"
+summary: "summary"
+description: "description"
+status: "status.name"
+priority: "priority.name"
+assignee: "assignee.displayName"
+reporter: "reporter.displayName"
+created: "created"
+updated: "updated"
+
+# Custom fields (Jira Cloud defaults - adjust IDs for your instance)
+storyPoints: "customfield_10016"
+sprint: "customfield_10020"
+epicLink: "customfield_10014"
+team: "customfield_10001.value"
+startDate: "customfield_10015"
+targetDate: "customfield_10017"
+labels: "labels"
 ```
 
 ### `config/org.yaml`
-Defines organizational structure roll-ups:
+Defines organizational hierarchy (Org → Group → Team):
 ```yaml
-departments:
-  - id: "engineering"
-    name: "Engineering"
-    teams:
-      - id: "platform"
-        name: "Platform"
-        project_keys: ["PLAT", "INFRA"]
-        members: ["alice", "bob"]
-      - id: "mobile"
-        name: "Mobile"
-        project_keys: ["MOBILE", "IOS", "ANDROID"]
-        members: ["charlie", "diana"]
-  
-  - id: "product"
-    name: "Product"
-    teams:
-      - id: "growth"
-        name: "Growth"
-        project_keys: ["GROWTH"]
-        members: ["eve", "frank"]
+Applications:
+  UI:
+    - red
+    - green
+    - blue
+  Server:
+    - pink
+    - white
+    - black
+  Network Connectivity:
+    - London
+    - New York
 
-# Roll-up rules
-rollup_rules:
-  # How to aggregate from issue → team → department
-  aggregation:
-    storyPoints: "sum"
-    taskCount: "count"
-    completionPercentage: "weighted_average"
+Infrastructure:
+  Cloud:
+    - AWS Team
+    - Azure Team
+  Data:
+    - Analytics
+    - Data Warehouse
 ```
 
 ### `config/initiatives.yaml`
-Defines strategic initiative structure roll-ups:
+Defines strategic initiative hierarchy (Goal → Sub-Initiative → Initiative):
 ```yaml
-initiatives:
-  - id: "cloud-migration"
-    title: "2026 Cloud Migration"
-    owner: "CTO"
-    mapping:
-      epic_keys: ["PLAT-101", "INFRA-105"]
-      labels: ["cloud-priority"]
-    
-  - id: "mobile-refresh"
-    title: "Mobile App Redesign"
-    owner: "VP Product"
-    mapping:
-      epic_keys: ["MOBILE-200", "MOBILE-201"]
-      project_keys: ["MOBILE"]
+Grow Business:
+  expand Asia:
+    - office in Hong Kong
+    - office in Singapore
+  expand Europe:
+    - office in Paris
+    - office in London
+  expand Africa:
+    - office in Cassablanca
 
-# Roll-up rules for initiatives
-rollup_rules:
-  # How to aggregate from task → epic → initiative
-  aggregation:
-    progress: "weighted_by_story_points"
-    budget_consumed: "sum"
-    at_risk_count: "count"
+Reduce Costs:
+  cloud migration:
+    - migrate compute
+    - migrate storage
+  vendor consolidation:
+    - consolidate SaaS tools
+
+Improve Quality:
+  test automation:
+    - UI test coverage
+    - API test coverage
+  technical debt:
+    - legacy code refactor
 ```
 
 ### `config/dashboards.yaml`
 ```yaml
 dashboards:
-  - id: "exec-view"
-    title: "Executive Portfolio"
-    fixedFilter: "status!=Done AND status!=Cancelled"
-    widgets: ["status", "assignee", "team", "priority"]
-    columns: ["key", "summary", "status", "assignee", "priority", "storyPoints", "health"]
-    view: "hierarchy"  # hierarchy or flat
-    summaryStats: ["count", "sum:storyPoints", "avg:storyPoints"]
-  
-  - id: "team-health"
-    title: "Team Health Dashboard"
-    fixedFilter: "type!=Epic"
-    widgets: ["status", "sprint"]
-    columns: ["key", "summary", "status", "assignee", "storyPoints"]
+  - id: "all-issues"
+    title: "All Issues"
     view: "flat"
-    summaryStats: ["count", "sum:storyPoints"]
+  
+  - id: "by-team"
+    title: "By Team"
+    view: "org"
+  
+  - id: "by-initiative"
+    title: "By Initiative"
+    view: "initiative"
+  
+  - id: "hierarchy"
+    title: "Parent-Child Hierarchy"
+    view: "hierarchy"
 ```
 
 ---
@@ -757,16 +831,23 @@ jira-dashboard/
 ```
 
 ### 8.2 Environment & Configuration
-1.  **Environment variables:** `JIRA_HOST`, `JIRA_EMAIL`, `JIRA_TOKEN`
-    * Alternatively, configure in `config/jira.yaml`:
-    ```yaml
-    jira:
-      host: "https://yourinstance.atlassian.net"
-      email: "you@example.com"
-      apiToken: "your-api-token"
-    ```
-2.  **Required config files:** All YAML files in `config/` directory must exist on first run.
-3.  **Auto-create directories:** Server creates `cache/` if it doesn't exist.
+
+**CRITICAL - Secrets Management:**
+NEVER commit credentials to version control. Use environment variables for all secrets.
+
+**Environment variables (REQUIRED):**
+```bash
+export JIRA_HOST="https://yourinstance.atlassian.net"
+export JIRA_EMAIL="you@example.com"
+export JIRA_API_TOKEN="your-api-token-here"
+```
+
+Alternatively, create `.env` file (gitignored):
+```bash
+JIRA_HOST=https://yourinstance.atlassian.net
+JIRA_EMAIL=you@example.com
+JIRA_API_TOKEN=your-token-here
+```
 
 ### 8.3 Startup Command
 ```bash
@@ -784,3 +865,246 @@ npx tsx server.ts
 - **Full Sync:** Runs when `cache/meta.json` doesn't exist. Downloads entire project history.
 - **Incremental Sync:** Runs when `cache/meta.json` exists. Downloads only changed issues.
 - **Field Discovery:** Automatic on first run; re-run when `?forceFieldRefresh=true` is detected.
+
+---
+
+## 9. Error Handling & Recovery
+
+### 9.1 API Error Handling
+
+**Rate Limiting (429 errors):**
+```javascript
+async function fetchWithRetry(url, options, maxRetries = 3) {
+  let delay = 100;  // Start with 100ms
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, options);
+      
+      if (response.status === 429) {
+        const retryAfter = response.headers.get('Retry-After') || delay / 1000;
+        console.warn(`Rate limited. Retrying after ${retryAfter}s...`);
+        await sleep(retryAfter * 1000);
+        delay *= 2;  // Exponential backoff
+        continue;
+      }
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      return response;
+    } catch (error) {
+      if (attempt === maxRetries - 1) throw error;
+      console.warn(`Attempt ${attempt + 1} failed, retrying in ${delay}ms...`);
+      await sleep(delay);
+      delay *= 2;
+    }
+  }
+}
+```
+
+**Network Failures:**
+- Preserve previous snapshot on sync failure
+- Update `meta.json` with error details:
+  ```json
+  {
+    "lastSync": "2026-03-19T14:30:00Z",
+    "lastError": {
+      "timestamp": "2026-03-19T16:45:00Z",
+      "message": "Network timeout after 30s",
+      "type": "NetworkError"
+    }
+  }
+  ```
+- Server remains operational with stale data; display warning in UI
+
+### 9.2 Data Integrity
+
+**Cache Corruption Detection:**
+```javascript
+function validateCacheIntegrity(snapshot) {
+  try {
+    // Check JSON structure
+    if (!snapshot.issues || !Array.isArray(snapshot.issues)) {
+      throw new Error('Invalid snapshot structure');
+    }
+    
+    // Validate required fields
+    for (const issue of snapshot.issues) {
+      if (!issue.key || !issue.fields) {
+        throw new Error(`Corrupt issue data: ${JSON.stringify(issue)}`);
+      }
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('Cache validation failed:', error);
+    return false;
+  }
+}
+```
+
+**Recovery Actions:**
+1. If current snapshot is corrupt → fallback to previous snapshot
+2. If all snapshots corrupt → trigger full resync
+3. Log all corruption events to `cache/errors.log`
+
+### 9.3 Configuration Errors
+
+**YAML Parse Errors:**
+```javascript
+try {
+  const config = yaml.load(fs.readFileSync('config/dashboards.yaml', 'utf8'));
+} catch (error) {
+  console.error('Failed to parse dashboards.yaml:', error.message);
+  console.error('Check YAML syntax at line', error.mark?.line);
+  process.exit(1);  // Fail fast
+}
+```
+
+**Missing Environment Variables:**
+```javascript
+function validateEnvironment() {
+  const required = ['JIRA_HOST', 'JIRA_EMAIL', 'JIRA_API_TOKEN'];
+  const missing = required.filter(key => !process.env[key]);
+  
+  if (missing.length > 0) {
+    console.error('ERROR: Missing required environment variables:');
+    missing.forEach(key => console.error(`  - ${key}`));
+    console.error('\nSet them in your shell or .env file.');
+    process.exit(1);
+  }
+}
+```
+
+---
+
+## 10. Monitoring & Observability
+
+### 10.1 Structured Logging
+
+**Log Format (JSON):**
+```javascript
+function log(level, message, metadata = {}) {
+  console.log(JSON.stringify({
+    timestamp: new Date().toISOString(),
+    level,
+    message,
+    ...metadata
+  }));
+}
+
+// Usage examples
+log('info', 'Starting sync', { projects: ['PLAT', 'MOBILE'] });
+log('warn', 'Rate limit approaching', { remaining: 10, resetAt: '2026-03-19T15:00:00Z' });
+log('error', 'Sync failed', { error: err.message, stack: err.stack });
+```
+
+**Log Events to Track:**
+- Sync start/completion (duration, issue count)
+- API calls (endpoint, duration, status code)
+- Cache operations (read, write, validation)
+- Configuration changes
+- All errors and warnings
+
+### 10.2 Metrics Collection
+
+**Key Metrics:**
+```javascript
+const metrics = {
+  sync: {
+    duration: 23.4,        // seconds
+    issuesProcessed: 1547,
+    apiCalls: 16,
+    avgApiLatency: 245,    // ms
+    errorsEncountered: 0
+  },
+  cache: {
+    sizeBytes: 12_400_000,
+    snapshotCount: 5,
+    oldestSnapshot: '2026-03-15_08-00-00'
+  },
+  api: {
+    requestsLast24h: 230,
+    avgResponseTime: 312,  // ms
+    errorRate: 0.02        // 2%
+  }
+};
+```
+
+**Export Metrics:**
+- `GET /api/metrics` returns JSON metrics
+- Optional: Prometheus-format export at `/metrics`
+
+### 10.3 Health Checks
+
+**Comprehensive Health Check:**
+```javascript
+app.get('/api/health', async (req, res) => {
+  const health = {
+    status: 'healthy',  // healthy, degraded, unhealthy
+    timestamp: new Date().toISOString(),
+    cache: {
+      lastSync: meta.lastSync,
+      ageMinutes: (Date.now() - new Date(meta.lastSync)) / 60000,
+      issueCount: meta.issueCount,
+      sizeBytes: meta.cacheSize
+    },
+    jira: null,  // Populated by /api/health/jira
+    errors: meta.lastError ? [meta.lastError] : []
+  };
+  
+  // Degrade status if cache is stale
+  if (health.cache.ageMinutes > 60) {
+    health.status = 'degraded';
+    health.warnings = ['Cache is over 1 hour old'];
+  }
+  
+  res.json(health);
+});
+
+app.get('/api/health/jira', async (req, res) => {
+  try {
+    // Test Jira connectivity
+    const response = await jiraClient.getServerInfo();
+    res.json({
+      status: 'connected',
+      version: response.version,
+      baseUrl: response.baseUrl
+    });
+  } catch (error) {
+    res.status(503).json({
+      status: 'disconnected',
+      error: error.message
+    });
+  }
+});
+```
+
+---
+
+## 11. Future Enhancements (Optional)
+
+### 11.1 Multi-User Authentication
+
+**OAuth Integration:**
+- Support Jira OAuth 2.0 for multi-user deployments
+- Per-user JQL filters (only see tickets you have permission to view)
+- Role-based dashboard visibility (exec dashboards for leadership only)
+
+**Session Management:**
+- Store user preferences (favorite dashboards, default filters)
+- Audit log of who viewed what data
+
+### 11.2 Advanced Export Features
+
+**PDF Report Generation:**
+- Generate executive-ready PDF reports with charts
+- Schedule automated weekly reports via email
+- Template system for custom report layouts
+
+**Data Warehouse Integration:**
+- Export to PostgreSQL/MySQL for historical trending
+- BigQuery integration for advanced analytics
+- Webhook support for real-time event streaming
