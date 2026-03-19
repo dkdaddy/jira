@@ -161,22 +161,6 @@ cache/
 }
 ```
 
-**field-definitions.json schema:**
-```json
-{
-  "fields": [
-    {
-      "id": "customfield_10016",
-      "name": "Story Points",
-      "custom": true,
-      "schema": {
-        "type": "number"
-      }
-    }
-  ],
-  "lastUpdated": "2026-03-19T14:30:00.000Z"
-}
-```
 
 ---
 
@@ -218,29 +202,36 @@ The system uses `field-mappings.yaml` to abstract Jira's field complexity:
 ### 4.1 Virtual Calculated Fields
 Before the data is rendered, the client-side engine must "hydrate" the issues with these computed properties:
 * **`daysInStatus`**: Current Date minus the date of the last status change.
-* **`scopeCreep`**: Boolean; `true` if `createdDate > sprintStartDate`.
-* **`workRatio`**: Calculated as `timeSpent / originalEstimate`.
 * **`healthStatus`**: A string (`red`, `yellow`, `green`) based on the Health Rules.
 
 ### 4.2 Hierarchy Mapping & Roll-ups
 The engine must map issues to two external dimensions and aggregate metrics upward:
 
 #### 4.2.1 The Org Axis (`config/org.yaml`)
-Maps individual issues to Team → Department structure:
+Maps individual issues to Team → Group → Org structure:
 
 **Mapping Logic:**
-1.  **Issue → Team:** Match using `project_key` or `members` list
+1.  **Issue → Team:** Match the team name to a leaf node in a YAML config file
     ```yaml
-    teams:
-      - id: "platform"
-        project_keys: ["PLAT", "INFRA"]  # Match by project
-        members: ["alice", "bob"]         # Match by assignee
+    Applications:
+      - UI:
+          - red
+          - green
+          - blue
+      - Server:
+          - pink
+          - white
+          - black
+      - Network Connectivity:
+          - London
+          - New York
     ```
-2.  **Team → Department:** Hierarchical parent relationship defined in YAML
-3.  **Orphan Handling:** Issues not matching any team go to "Unassigned" bucket
+2.  **Team → Group:** Hierarchical parent relationship defined in YAML
+3.  **Group → Org:** Top-level organizational unit
+4.  **Orphan Handling:** Issues not matching any team go to "Unassigned" bucket
 
 **Roll-up Aggregations:**
-- **Story Points:** Sum all issue story points within team/department
+- **Story Points:** Sum all issue story points within team/group/org
 - **Task Count:** Count of issues
 - **Completion %:** `(closed issues / total issues) * 100`
 - **Health Distribution:** Count of red/yellow/green issues
@@ -248,43 +239,160 @@ Maps individual issues to Team → Department structure:
 **Example Output:**
 ```javascript
 {
-  department: "Engineering",
-  teams: [
+  org: "Applications",
+  groups: [
     {
-      id: "platform",
-      name: "Platform",
-      metrics: {
-        totalPoints: 125,
-        completedPoints: 78,
-        completionPct: 62.4,
-        issueCount: 45,
-        healthCounts: { red: 3, yellow: 12, green: 30 }
+      id: "ui",
+      name: "UI",
+      teams: [
+        {
+          id: "red",
+          name: "Red",
+          metrics: {
+            totalPoints: 45,
+            completedPoints: 28,
+            completionPct: 62.2,
+            issueCount: 15,
+            healthCounts: { red: 1, yellow: 4, green: 10 }
+          }
+        },
+        {
+          id: "green",
+          name: "Green",
+          metrics: {
+            totalPoints: 52,
+            completedPoints: 40,
+            completionPct: 76.9,
+            issueCount: 18,
+            healthCounts: { red: 0, yellow: 3, green: 15 }
+          }
+        },
+        {
+          id: "blue",
+          name: "Blue",
+          metrics: {
+            totalPoints: 38,
+            completedPoints: 22,
+            completionPct: 57.9,
+            issueCount: 12,
+            healthCounts: { red: 2, yellow: 2, green: 8 }
+          }
+        }
+      ],
+      metrics: {  // Rolled up from UI teams
+        totalPoints: 135,
+        completedPoints: 90,
+        completionPct: 66.7,
+        issueCount: 45
+      }
+    },
+    {
+      id: "server",
+      name: "Server",
+      teams: [
+        {
+          id: "pink",
+          name: "Pink",
+          metrics: {
+            totalPoints: 60,
+            completedPoints: 45,
+            completionPct: 75.0,
+            issueCount: 20,
+            healthCounts: { red: 1, yellow: 5, green: 14 }
+          }
+        },
+        {
+          id: "white",
+          name: "White",
+          metrics: {
+            totalPoints: 72,
+            completedPoints: 50,
+            completionPct: 69.4,
+            issueCount: 25,
+            healthCounts: { red: 2, yellow: 6, green: 17 }
+          }
+        },
+        {
+          id: "black",
+          name: "Black",
+          metrics: {
+            totalPoints: 55,
+            completedPoints: 38,
+            completionPct: 69.1,
+            issueCount: 18,
+            healthCounts: { red: 0, yellow: 4, green: 14 }
+          }
+        }
+      ],
+      metrics: {  // Rolled up from Server teams
+        totalPoints: 187,
+        completedPoints: 133,
+        completionPct: 71.1,
+        issueCount: 63
+      }
+    },
+    {
+      id: "network-connectivity",
+      name: "Network Connectivity",
+      teams: [
+        {
+          id: "london",
+          name: "London",
+          metrics: {
+            totalPoints: 42,
+            completedPoints: 30,
+            completionPct: 71.4,
+            issueCount: 14,
+            healthCounts: { red: 1, yellow: 3, green: 10 }
+          }
+        },
+        {
+          id: "new-york",
+          name: "New York",
+          metrics: {
+            totalPoints: 48,
+            completedPoints: 36,
+            completionPct: 75.0,
+            issueCount: 16,
+            healthCounts: { red: 0, yellow: 2, green: 14 }
+          }
+        }
+      ],
+      metrics: {  // Rolled up from Network Connectivity teams
+        totalPoints: 90,
+        completedPoints: 66,
+        completionPct: 73.3,
+        issueCount: 30
       }
     }
   ],
-  metrics: {  // Rolled up from all teams
-    totalPoints: 340,
-    completionPct: 58.2
+  metrics: {  // Rolled up from all groups in Applications org
+    totalPoints: 412,
+    completedPoints: 289,
+    completionPct: 70.1,
+    issueCount: 138
   }
 }
 ```
 
 #### 4.2.2 The Strategic Axis (`config/initiatives.yaml`)
-Maps issues to Initiative hierarchy using Epic relationships and labels:
+Maps issues to Initiative → Sub-Initiative → Goal hierarchy using the initiative field:
 
 **Mapping Logic:**
-1.  **Issue → Epic:** Use Jira's native `parent` relationship or `epicLink` custom field
-2.  **Epic → Initiative:** Match epic keys or labels against `initiatives.yaml`:
+1.  **Issue → Initiative:** Map using the `initiative` custom field value to a leaf node
     ```yaml
-    initiatives:
-      - id: "cloud-migration"
-        mapping:
-          epic_keys: ["PLAT-101"]      # Direct epic mapping
-          labels: ["cloud-priority"]    # Label-based mapping
-          project_keys: ["INFRA"]       # All issues from project
+    Grow Business:
+      - expand Asia:
+          - office in Hong Kong
+      - expand Europe:
+          - office in Paris
+          - office in London
+      - expand Africa:
+          - office in Cassablanca
     ```
-3.  **Multi-Initiative Assignment:** Issues can belong to multiple initiatives via labels
-4.  **Unassigned Handling:** Issues without epic/label go to "No Initiative" view
+2.  **Initiative → Sub-Initiative:** Hierarchical parent relationship defined in YAML
+3.  **Sub-Initiative → Goal:** Top-level strategic goal
+4.  **Unassigned Handling:** Issues without initiative field go to "No Initiative" view
 
 **Roll-up Aggregations:**
 - **Progress:** Weighted by story points: `sum(completed_points) / sum(total_points)`
@@ -295,40 +403,187 @@ Maps issues to Initiative hierarchy using Epic relationships and labels:
 **Example Output:**
 ```javascript
 {
-  initiative: "Cloud Migration",
-  epics: [
+  goal: "Grow Business",
+  subInitiatives: [
     {
-      key: "PLAT-101",
-      summary: "Migrate Auth Service",
+      id: "expand-asia",
+      name: "expand Asia",
+      initiatives: [
+        {
+          id: "office-hong-kong",
+          name: "office in Hong Kong",
+          metrics: {
+            totalPoints: 85,
+            completedPoints: 60,
+            progress: 70.6,
+            issueCount: 28,
+            atRisk: 3,
+            budget: 450000
+          }
+        }
+      ],
+      metrics: {  // Rolled up from expand Asia initiatives
+        totalPoints: 85,
+        completedPoints: 60,
+        progress: 70.6,
+        issueCount: 28,
+        atRisk: 3,
+        budget: 450000
+      }
+    },
+    {
+      id: "expand-europe",
+      name: "expand Europe",
+      initiatives: [
+        {
+          id: "office-paris",
+          name: "office in Paris",
+          metrics: {
+            totalPoints: 120,
+            completedPoints: 85,
+            progress: 70.8,
+            issueCount: 42,
+            atRisk: 5,
+            budget: 680000
+          }
+        },
+        {
+          id: "office-london",
+          name: "office in London",
+          metrics: {
+            totalPoints: 95,
+            completedPoints: 72,
+            progress: 75.8,
+            issueCount: 35,
+            atRisk: 2,
+            budget: 520000
+          }
+        }
+      ],
+      metrics: {  // Rolled up from expand Europe initiatives
+        totalPoints: 215,
+        completedPoints: 157,
+        progress: 73.0,
+        issueCount: 77,
+        atRisk: 7,
+        budget: 1200000
+      }
+    },
+    {
+      id: "expand-africa",
+      name: "expand Africa",
+      initiatives: [],
       metrics: {
-        totalPoints: 55,
-        completedPoints: 40,
-        progress: 72.7,
-        issueCount: 12,
-        atRisk: 2
+        totalPoints: 0,
+        completedPoints: 0,
+        progress: 0,
+        issueCount: 0,
+        atRisk: 0,
+        budget: 0
       }
     }
   ],
-  metrics: {  // Rolled up from all epics
-    totalPoints: 220,
-    progress: 65.4,
-    budget: 850000,
-    atRisk: 7
+  metrics: {  // Rolled up from all sub-initiatives in Grow Business goal
+    totalPoints: 300,
+    completedPoints: 217,
+    progress: 72.3,
+    issueCount: 105,
+    atRisk: 10,
+    budget: 1650000
   }
 }
 ```
 
-#### 4.2.3 Cross-Hierarchy Views
-The UI can display matrices combining both hierarchies:
+#### 4.2.3 The Parent Link Hierarchy
+Maps issues using Jira's native parent-child relationships to build a dynamic hierarchy:
 
-**Example: Initiative × Department Heatmap**
-```
-                Platform  Mobile  Data
-Cloud Migration    45%     20%    35%
-Mobile Refresh     10%     85%     5%
-```
+**Mapping Logic:**
+1.  **Issue → Parent:** Use Jira's `parent` field to establish direct parent-child relationships
+2.  **Recursive Traversal:** Walk up the parent chain to find root issues (epics, stories without parents)
+3.  **Multi-Level Support:** Automatically builds tree of arbitrary depth (Epic → Story → Task → Subtask)
+4.  **Orphan Handling:** Issues without parents appear as root-level nodes
 
-Shows what % of each initiative is owned by which department.
+**Hierarchy Characteristics:**
+- **Dynamic Structure:** No YAML configuration required; hierarchy emerges from Jira links
+- **Issue Types:** Typically Epic → Story → Task → Subtask, but supports any parent-child combination
+- **Cross-Project:** Can span multiple Jira projects if parent links exist
+
+**Roll-up Aggregations:**
+- **Story Points:** Sum all descendant story points
+- **Task Count:** Count of all descendant issues
+- **Completion %:** `(closed descendants / total descendants) * 100`
+- **Health Propagation:** Parent inherits worst health status from any child
+
+**Example Output:**
+```javascript
+{
+  key: "PLAT-100",
+  summary: "Platform Modernization Epic",
+  issueType: "Epic",
+  children: [
+    {
+      key: "PLAT-101",
+      summary: "Migrate Auth Service",
+      issueType: "Story",
+      children: [
+        {
+          key: "PLAT-102",
+          summary: "Update OAuth library",
+          issueType: "Task",
+          children: [],
+          metrics: {
+            totalPoints: 5,
+            completedPoints: 5,
+            completionPct: 100,
+            issueCount: 1,
+            healthStatus: "green"
+          }
+        },
+        {
+          key: "PLAT-103",
+          summary: "Add SSO support",
+          issueType: "Task",
+          children: [],
+          metrics: {
+            totalPoints: 8,
+            completedPoints: 3,
+            completionPct: 37.5,
+            issueCount: 1,
+            healthStatus: "yellow"
+          }
+        }
+      ],
+      metrics: {  // Rolled up from child tasks
+        totalPoints: 13,
+        completedPoints: 8,
+        completionPct: 61.5,
+        issueCount: 3,
+        healthStatus: "yellow"  // Inherited from worst child
+      }
+    },
+    {
+      key: "PLAT-110",
+      summary: "Upgrade Database",
+      issueType: "Story",
+      children: [],
+      metrics: {
+        totalPoints: 21,
+        completedPoints: 21,
+        completionPct: 100,
+        issueCount: 1,
+        healthStatus: "green"
+      }
+    }
+  ],
+  metrics: {  // Rolled up from all descendants
+    totalPoints: 34,
+    completedPoints: 29,
+    completionPct: 85.3,
+    issueCount: 5,
+    healthStatus: "yellow"
+  }
+}
+```
 
 ---
 
@@ -337,19 +592,8 @@ Shows what % of each initiative is owned by which department.
 ### 5.1 Tabbed Container System
 The UI must parse `dashboards.yaml` to generate a dynamic navigation bar. Switching tabs must filter the in-memory dataset instantly without a network request.
 
-### 5.2 The Hierarchical Grid
-Issues must be renderable in a "Drill-down" format using native HTML:
-```html
-<details class="level-1-initiative">
-  <summary>Initiative: Mobile Refresh (65%)</summary>
-  <details class="level-2-team">
-    <summary>Team: iOS Squad (40%)</summary>
-    <table></table>
-  </details>
-</details>
-```
 
-### 5.3 Interactive Features
+### 5.2 Interactive Features
 * **Search-as-you-type:** A global input that filters the current view's `issue.key` and `issue.fields.summary`.
 * **Multi-Select Widgets:** Dropdowns for Status, Priority, and Team as defined in the YAML.
 * **Health Formatting:** Rows where `healthStatus === 'red'` must have a distinct background color.
@@ -397,14 +641,6 @@ field_mappings:
   costCenter: "customfield_12345"
   technicalOwner: "customfield_12346"
   
-  # Hierarchy roll-up mappings
-  orgHierarchy:
-    department: "customfield_10001"  # Team field
-    division: "project.name"          # Project name as division
-  
-  initiativeHierarchy:
-    initiative: "parent.key"          # Epic/Initiative key
-    theme: "customfield_11001"        # Strategic theme custom field
 ```
 
 ### `config/org.yaml`
