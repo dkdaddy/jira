@@ -802,21 +802,37 @@ Improve Quality:
 ### `config/dashboards.yaml`
 ```yaml
 dashboards:
+  - id: "exec-view"
+    title: "Executive Portfolio"
+    fixedFilter: "status!=Done AND status!=Cancelled"
+    widgets: ["status", "assignee", "team", "priority", "quarter"]
+    columns: ["key", "summary", "status", "assignee", "priority", "estimate", "epicName", "quarter", "dueDate", "health"]
+    view: "hierarchy"  # hierarchy or flat
+    summaryStats: ["count", "sum:estimate", "avg:estimate"]
+
+  - id: "team-health"
+    title: "Team Health Dashboard"
+    fixedFilter: "type!=Epic"
+    widgets: ["status", "quarter", "team"]
+    columns: ["key", "summary", "status", "assignee", "team", "estimate", "tShirtSize", "startDate", "dueDate"]
+    view: "flat"
+    summaryStats: ["count", "sum:estimate"]
+  
+  - id: "engineering-view"
+    title: "Engineering Dashboard"
+    fixedFilter: "team IS NOT EMPTY"
+    widgets: ["status", "team", "engLead", "priority"]
+    columns: ["key", "summary", "type", "status", "assignee", "engLead", "estimate", "betaDate", "dueDate"]
+    view: "flat"
+    summaryStats: ["count", "sum:estimate", "avg:estimate"]
+  
   - id: "all-issues"
     title: "All Issues"
+    fixedFilter: ""
+    widgets: ["status", "type", "priority", "assignee"]
+    columns: ["key", "summary", "type", "status", "assignee", "priority", "estimate", "dueDate"]
     view: "flat"
-  
-  - id: "by-team"
-    title: "By Team"
-    view: "org"
-  
-  - id: "by-initiative"
-    title: "By Initiative"
-    view: "initiative"
-  
-  - id: "hierarchy"
-    title: "Parent-Child Hierarchy"
-    view: "hierarchy"
+    summaryStats: ["count", "sum:estimate"]
 ```
 
 ---
