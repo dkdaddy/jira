@@ -708,17 +708,19 @@ rollup_rules:
 dashboards:
   - id: "exec-view"
     title: "Executive Portfolio"
-    viewBy: "initiative" # Grouping axis
-    columns: ["key", "summary", "status", "health"]
-    summaryStats:
-      - label: "Total Points"
-        calc: "sum"
-        field: "storyPoints"
-    health_rules:
-      - condition: "status == 'Blocked'"
-        result: "red"
-      - condition: "daysInStatus > 10"
-        result: "yellow"
+    fixedFilter: "status!=Done AND status!=Cancelled"
+    widgets: ["status", "assignee", "team", "priority"]
+    columns: ["key", "summary", "status", "assignee", "priority", "storyPoints", "health"]
+    view: "hierarchy"  # hierarchy or flat
+    summaryStats: ["count", "sum:storyPoints", "avg:storyPoints"]
+  
+  - id: "team-health"
+    title: "Team Health Dashboard"
+    fixedFilter: "type!=Epic"
+    widgets: ["status", "sprint"]
+    columns: ["key", "summary", "status", "assignee", "storyPoints"]
+    view: "flat"
+    summaryStats: ["count", "sum:storyPoints"]
 ```
 
 ---
