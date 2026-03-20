@@ -17,7 +17,7 @@ A high-performance, **offline-first** Jira reporting tool that runs as a Node.js
 * **Cache Format:** Timestamped JSON files (`cache/YYYY-MM-DD_HH-mm-ss/{project_key}.json`)
 * **Field Retrieval:** Fetch ALL available fields from Jira (standard + custom)
 * **Configuration Format:** YAML for all configuration files (human-readable, supports comments)
-* **Secrets Management:** Environment variables for credentials; never commit secrets to YAML files
+* **Secrets Management:** All credentials stored in `config/jira.yaml` (gitignored); never commit `config/jira.yaml` to version control
 * **Scale Limits:** Optimized for up to 10,000 issues
 * **Browser Support:** Modern browsers with ES2020+ support (Chrome 90+, Firefox 88+, Safari 14+)
 
@@ -62,11 +62,11 @@ The system maintains state across runs to minimize API calls:
   - Load previous snapshot
   - Update changed issues
   - Add new issues
-  - Mark deleted issues (if issue no longer returned)
+  - Exclude deleted issues (issues no longer returned by Jira are omitted from the new snapshot)
 - Write new `meta.json` with updated timestamp
 
 **Handling Edge Cases:**
-- **Deleted Issues:** Compare current fetch with previous snapshot; issues not in current result set but marked deleted in API are flagged.
+- **Deleted Issues:** Issues present in the previous snapshot but absent from the current fetch are excluded from the new snapshot entirely and dropped from `/api/data` responses.
 - **Field Schema Changes:** Re-fetch field definitions if custom fields have been added/removed.
 - **Time Zone Handling:** Always use UTC ISO 8601 format for timestamps.
 - **Clock Skew:** Subtract dynamic buffer (max of 60s or 2x last sync duration) from `lastSync` to avoid missing issues.
@@ -158,16 +158,19 @@ async function fetchAllIssues(jql) {
 - Store page size in configuration for easy tuning
 
 ### 3.2 The API Endpoints
-* `GET /api/config`: Merges and returns `dashboards.yaml`, `org.yaml`, and `initiatives.yaml`.
-* `GET /api/data`: Streams the combined JSON cache from disk to the browser (paginated for large datasets).
-* `GET /api/data?limit=1000&offset=0`: Paginated data endpoint for datasets > 5000 issues.
-* `GET /api/snapshots`: Lists all available timestamped snapshots.
-* `GET /api/snapshots/:timestamp`: Loads data from a specific historical snapshot.
-* `GET /api/fields`: Returns field mapping configuration from `field-mappings.yaml`.
-* `GET /api/health`: Returns sync status, cache age, last error (if any).
-* `GET /api/health/jira`: Tests Jira connectivity (can we reach the API?).
-* `GET /api/export/csv`: Exports current filtered view as CSV.
-* `GET /api/export/json`: Exports current filtered view as JSON.
+
+> All `/api/*` endpoints respond with `Content-Type: application/json` unless noted otherwise.
+
+* `GET /api/config`: Returns merged JSON from `dashboards.yaml`, `org.yaml`, and `initiatives.yaml`.
+* `GET /api/data`: Returns all normalized (field-mapped, `healthStatus`-computed) issues as a JSON array. Deleted issues are excluded.
+* `GET /api/data?limit=1000&offset=0`: Paginated variant; returns `{ issues: [...], total: N, offset: 0, limit: 1000 }`.
+* `GET /api/snapshots`: Returns a JSON list of all available timestamped snapshot directories.
+* `GET /api/snapshots/:timestamp`: Returns normalized data loaded from the specified historical snapshot.
+* `GET /api/fields`: Returns the parsed `field-mappings.yaml` as JSON.
+* `GET /api/health`: Returns sync status, cache age, and last error (if any) as JSON.
+* `GET /api/health/jira`: Tests Jira connectivity; returns `{ status: "connected" | "disconnected" }`.
+* `GET /api/export/csv`: Exports current cached data as `text/csv`.
+* `GET /api/export/json`: Exports current cached data as a downloadable JSON file.
 * `GET /`: Serves `public/index.html`.
 
 ### 3.3 Cache Structure & Metadata
@@ -210,7 +213,13 @@ cache/
 The system uses `field-mappings.yaml` to abstract Jira's field complexity:
 
 **Process Flow:**
-1.  **Load Field Mappings:** Read `config/field-mappings.yaml` to get the logical name → Jira field path table (e.g., `team: "customfield_10001.value"`, `assignee: "assignee.displayName"`).
+1.  **Load Field Mappings:** Read `config/field-mappings.yaml` to get field definitions. Each entry maps a logical name to a `path` (dot-notation into `issue.fields`), a `type` (determines UI widget and filter behaviour), and a `label` (column header). Example:
+    ```yaml
+    team:
+      path: "customfield_10001.value"
+      type: dropdown
+      label: "Team"
+    ```
 2.  **Validate Mappings (optional):** Cross-reference the mapped field IDs against `cache/field-definitions.json`; log a warning for any mapped field that does not exist in the Jira instance.
 3.  **Apply Mappings:** For each raw Jira issue, resolve every entry in the mapping table by walking the dot-notation path into `issue.fields` and writing the result under the logical name:
     ```javascript
@@ -243,14 +252,17 @@ The system uses `field-mappings.yaml` to abstract Jira's field complexity:
       "description": "Add Redis caching layer",
       "type": "Story",
       "priority": "High",
+      "parent": "PLAT-100",
       "team": "Platform Team",
       "estimate": 8,
       "tShirtSize": "M",
       "epicName": "Platform Modernization",
       "quarter": "Q2 2026",
+      "initiative": "office in Hong Kong",
       "assignee": "Alice",
       "engLead": "Bob",
       "status": "In Progress",
+      "healthStatus": "green",
       "dueDate": "2026-05-15",
       "betaDate": "2026-04-30",
       "startDate": "2026-03-01"
@@ -268,10 +280,34 @@ The system uses `field-mappings.yaml` to abstract Jira's field complexity:
 - Easy to adapt when Jira custom field IDs change.
 - Configuration-driven: no code changes needed for new fields.
 
-### 4.1 Virtual Calculated Fields
-Before the data is rendered, the client-side engine must "hydrate" the issues with these computed properties:
-* **`daysInStatus`**: Current Date minus the date of the last status change.
-* **`healthStatus`**: A string (`red`, `yellow`, `green`) based on the Health Rules.
+### 4.1 Computed Fields (Server-Side)
+After field mapping, the server computes `healthStatus` for every issue before writing normalized data to disk. The `healthStatus` property is included in every normalized issue returned by `/api/data`.
+
+* **`healthStatus`**: A string (`red`, `yellow`, `green`) determined by the following rules, evaluated in priority order:
+
+| Priority | Value | Condition |
+|----------|-------|-----------|
+| 1 | `green` | `status` is in `closedStatuses` (regardless of dates) |
+| 2 | `red` | `status` is `"Blocked"` |
+| 3 | `red` | `dueDate` is in the past and issue is not closed |
+| 4 | `yellow` | `dueDate` is within the next 7 days and issue is not closed |
+| 5 | `yellow` | `assignee` is `null` |
+| 6 | `green` | All other open issues |
+
+```javascript
+function computeHealthStatus(issue, closedStatuses) {
+  if (closedStatuses.includes(issue.status)) return 'green';
+  if (issue.status === 'Blocked') return 'red';
+  const today = new Date();
+  const due = issue.dueDate ? new Date(issue.dueDate) : null;
+  if (due && due < today) return 'red';
+  if (due && (due - today) < 7 * 24 * 60 * 60 * 1000) return 'yellow';
+  if (!issue.assignee) return 'yellow';
+  return 'green';
+}
+```
+
+> `closedStatuses` is read from the `closedStatuses` list in `config/jira.yaml`, defaulting to `["Done", "Closed", "Resolved", "Won't Do"]`.
 
 ### 4.2 Hierarchy Mapping & Roll-ups
 The engine must map issues to two external dimensions and aggregate metrics upward:
@@ -465,7 +501,7 @@ Maps issues to Initiative → Sub-Initiative → Goal hierarchy using the initia
 
 **Roll-up Aggregations:**
 - **Progress:** Weighted by estimate: `sum(completed_estimate) / sum(total_estimate)`
-- **Budget:** Sum of custom `costCenter` field values
+- **Total Estimate:** Sum of `estimate` field values for all issues in the group
 - **At Risk:** Count of issues with `healthStatus === 'red'`
 - **Timeline:** Earliest `startDate` and latest `dueDate` across all issues
 
@@ -486,8 +522,7 @@ Maps issues to Initiative → Sub-Initiative → Goal hierarchy using the initia
             completedEstimate: 60,
             progress: 70.6,
             issueCount: 28,
-            atRisk: 3,
-            budget: 450000
+            atRisk: 3
           }
         }
       ],
@@ -496,8 +531,7 @@ Maps issues to Initiative → Sub-Initiative → Goal hierarchy using the initia
         completedEstimate: 60,
         progress: 70.6,
         issueCount: 28,
-        atRisk: 3,
-        budget: 450000
+        atRisk: 3
       }
     },
     {
@@ -512,8 +546,7 @@ Maps issues to Initiative → Sub-Initiative → Goal hierarchy using the initia
             completedEstimate: 85,
             progress: 70.8,
             issueCount: 42,
-            atRisk: 5,
-            budget: 680000
+            atRisk: 5
           }
         },
         {
@@ -524,8 +557,7 @@ Maps issues to Initiative → Sub-Initiative → Goal hierarchy using the initia
             completedEstimate: 72,
             progress: 75.8,
             issueCount: 35,
-            atRisk: 2,
-            budget: 520000
+            atRisk: 2
           }
         }
       ],
@@ -534,8 +566,7 @@ Maps issues to Initiative → Sub-Initiative → Goal hierarchy using the initia
         completedEstimate: 157,
         progress: 73.0,
         issueCount: 77,
-        atRisk: 7,
-        budget: 1200000
+        atRisk: 7
       }
     },
     {
@@ -547,8 +578,7 @@ Maps issues to Initiative → Sub-Initiative → Goal hierarchy using the initia
         completedEstimate: 0,
         progress: 0,
         issueCount: 0,
-        atRisk: 0,
-        budget: 0
+        atRisk: 0
       }
     }
   ],
@@ -557,8 +587,7 @@ Maps issues to Initiative → Sub-Initiative → Goal hierarchy using the initia
     completedEstimate: 217,
     progress: 72.3,
     issueCount: 105,
-    atRisk: 10,
-    budget: 1650000
+    atRisk: 10
   }
 }
 ```
@@ -677,14 +706,31 @@ function detectCycles(issueKey, visited = new Set()) {
 ## 5. Frontend & UI Requirements
 
 ### 5.1 Tabbed Container System
-The UI must parse `dashboards.yaml` to generate a dynamic navigation bar. Switching tabs must filter the in-memory dataset instantly without a network request.
+The UI fetches `GET /api/config` on load to get the full dashboard configuration. Each entry in `dashboards.yaml` generates one tab in the navigation bar.
+
+**Per-tab behaviour:**
+1. **Base Filter:** The `baseFilter` expression (e.g., `status = "Ideation"`) is applied client-side to the full in-memory dataset before any filter widget is evaluated. An empty string shows all issues.
+2. **Filter Widgets:** The `filterWidgets` list specifies which fields render as interactive filter controls above the table. The widget UI is determined by the field's `type` in `field-mappings.yaml`.
+3. **Columns:** The `columns` list specifies which fields appear as table columns, in order. Column headers use the field's `label` from `field-mappings.yaml`.
+4. **Tab Switching:** Switching tabs applies the new `baseFilter`, rebuilds the filter widget bar, and re-renders columns — all client-side with no network request.
 
 
 ### 5.2 Interactive Features
-* **Search-as-you-type:** A global input that filters the current view's `issue.key` and `issue.fields.summary`.
-* **Multi-Select Widgets:** Dropdowns for Status, Priority, and Team as defined in the YAML.
-* **Health Formatting:** Rows where `healthStatus === 'red'` must have a distinct background color.
-* **Export Buttons:** CSV and JSON export for current filtered view.
+* **Search-as-you-type:** A global text input that filters by `key` and `summary` across the current tab's base-filtered dataset.
+* **Filter Widgets:** Rendered dynamically from the current dashboard's `filterWidgets` list. Widget type is read from `field-mappings.yaml`:
+
+| Type | Widget | Behaviour |
+|------|--------|-----------|
+| `text` | Text input | Substring match (case-insensitive) |
+| `dropdown` | Single-select `<select>` | Exact match; options populated from distinct values in current dataset |
+| `multiselect` | Multi-value select | OR-match: issue passes if its value is in the selected set |
+| `date` | From / To date inputs | Inclusive date-range filter |
+| `number` | Min / Max numeric inputs | Inclusive range filter |
+
+* **Filter Interaction:** All active filters (base filter + search input + filter widgets) are ANDed together.
+* **Clear Button:** Resets search input and all filter widgets for the current tab; `baseFilter` remains active.
+* **Health Formatting:** Rows where `healthStatus === 'red'` have a red background tint; `'yellow'` have a yellow tint.
+* **Export Buttons:** CSV and JSON export for the current fully-filtered view.
 * **Refresh Indicator:** Visual timestamp showing cache age (e.g., "Last updated: 2 hours ago").
 
 ### 5.3 Client-Side Caching & Performance
@@ -713,6 +759,21 @@ app.get('/api/data', (req, res) => {
 
 ## 6. Configuration Schemas (Examples)
 
+### `config/jira.yaml`
+Jira connection settings and server configuration. **This file is gitignored and must never be committed.**
+```yaml
+host: "https://yourinstance.atlassian.net"
+email: "you@example.com"
+apiToken: "your-api-token-here"    # from id.atlassian.com/manage-profile/security/api-tokens
+port: 3000                          # HTTP server port
+maxResults: 100                     # Issues per API page (Jira max: 100)
+closedStatuses:                     # Statuses treated as "done" for healthStatus & completion %
+  - Done
+  - Closed
+  - Resolved
+  - "Won't Do"
+```
+
 ### `config/projects.yaml`
 Defines which Jira projects to sync:
 ```yaml
@@ -723,29 +784,118 @@ projects:
 ```
 
 ### `config/field-mappings.yaml`
-Maps logical UI field names to Jira field paths:
+Maps logical field names to Jira field paths. Each entry has three properties:
+- `path` — dot-notation path into `issue.fields` (use `"key"` for the top-level issue key; use `"_computed"` for server-generated synthetic fields)
+- `type` — determines the filter widget rendered in the UI (see widget type table in Section 5.2)
+- `label` — human-readable column header
+
 ```yaml
 # Standard fields
-key: "key"
-summary: "summary"
-description: "description"
-type: "issuetype.name"
-status: "status.name"
-priority: "priority.name"
-assignee: "assignee.displayName"
-created: "created"
-updated: "updated"
-dueDate: "duedate"
+key:
+  path: "key"
+  type: text
+  label: "Key"
+
+summary:
+  path: "summary"
+  type: text
+  label: "Summary"
+
+description:
+  path: "description"
+  type: text
+  label: "Description"
+
+type:
+  path: "issuetype.name"
+  type: dropdown
+  label: "Type"
+
+status:
+  path: "status.name"
+  type: dropdown
+  label: "Status"
+
+priority:
+  path: "priority.name"
+  type: dropdown
+  label: "Priority"
+
+assignee:
+  path: "assignee.displayName"
+  type: dropdown
+  label: "Assignee"
+
+parent:
+  path: "parent.key"
+  type: text
+  label: "Parent"
+
+created:
+  path: "created"
+  type: date
+  label: "Created"
+
+updated:
+  path: "updated"
+  type: date
+  label: "Updated"
+
+dueDate:
+  path: "duedate"
+  type: date
+  label: "Due Date"
+
+healthStatus:
+  path: "_computed"            # Set by server after normalization; not a Jira field
+  type: dropdown
+  label: "Health"
 
 # Custom fields (adjust IDs for your Jira instance)
-team: "customfield_10001.value"
-estimate: "customfield_10016"
-tShirtSize: "customfield_10020"
-epicName: "customfield_10014"
-quarter: "customfield_10025"
-engLead: "customfield_10030.displayName"
-startDate: "customfield_10015"
-betaDate: "customfield_10040"
+team:
+  path: "customfield_10001.value"
+  type: dropdown
+  label: "Team"
+
+estimate:
+  path: "customfield_10016"
+  type: number
+  label: "Estimate"
+
+tShirtSize:
+  path: "customfield_10020"
+  type: dropdown
+  label: "T-Shirt Size"
+
+epicName:
+  path: "customfield_10014"
+  type: text
+  label: "Epic"
+
+quarter:
+  path: "customfield_10025"
+  type: dropdown
+  label: "Quarter"
+
+engLead:
+  path: "customfield_10030.displayName"
+  type: dropdown
+  label: "Eng Lead"
+
+initiative:
+  path: "customfield_10050"    # Verify field ID for your Jira instance
+  type: dropdown
+  label: "Initiative"
+
+startDate:
+  path: "customfield_10015"
+  type: date
+  label: "Start Date"
+
+betaDate:
+  path: "customfield_10040"
+  type: date
+  label: "Beta Date"
 ```
 
 ### `config/org.yaml`
@@ -802,23 +952,104 @@ Improve Quality:
 ```
 
 ### `config/dashboards.yaml`
+Each dashboard entry has:
+- `id` — unique identifier used in client routing
+- `title` — tab label shown in the navigation bar
+- `view` — rendering mode: `flat` (table), `org` (team roll-up tree), `initiative` (strategic roll-up tree), `hierarchy` (parent-child tree)
+- `baseFilter` — client-side filter expression applied before filter widgets. Supports `=`, `!=`, `IN (...)`, and `AND` to combine conditions. Empty string shows all issues. Examples:
+  - Single value: `status = "In Progress"`
+  - List match: `status IN ("In Progress", "In Review", "Blocked")`
+  - Combined: `status IN ("In Progress", "Blocked") AND team = "Platform"`
+  - Multi-field: `quarter = "Q2 2026" AND type IN ("Story", "Task") AND priority != "Low"`
+- `filterWidgets` — ordered list of field names (from `field-mappings.yaml`) to render as filter controls
+- `columns` — ordered list of field names to display as table columns
+
 ```yaml
 dashboards:
   - id: "all-issues"
     title: "All Issues"
     view: "flat"
-  
+    baseFilter: ""
+    filterWidgets:
+      - status
+      - priority
+      - team
+      - assignee
+      - quarter
+    columns:
+      - key
+      - summary
+      - type
+      - status
+      - priority
+      - assignee
+      - team
+      - estimate
+      - dueDate
+      - healthStatus
+
+  - id: "ideation"
+    title: "Ideation"
+    view: "flat"
+    baseFilter: "status IN (\"Ideation\", \"Discovery\") AND type IN (\"Story\", \"Epic\")"
+    filterWidgets:
+      - priority
+      - team
+      - quarter
+      - assignee
+    columns:
+      - key
+      - summary
+      - priority
+      - team
+      - quarter
+      - assignee
+      - healthStatus
+
   - id: "by-team"
     title: "By Team"
     view: "org"
-  
+    baseFilter: ""
+    filterWidgets:
+      - status
+      - quarter
+    columns:
+      - team
+      - issueCount
+      - totalEstimate
+      - completionPct
+      - healthCounts
+
   - id: "by-initiative"
     title: "By Initiative"
     view: "initiative"
-  
+    baseFilter: ""
+    filterWidgets:
+      - status
+      - quarter
+    columns:
+      - initiative
+      - issueCount
+      - totalEstimate
+      - progress
+      - atRisk
+
   - id: "hierarchy"
     title: "Parent-Child Hierarchy"
     view: "hierarchy"
+    baseFilter: ""
+    filterWidgets:
+      - status
+      - team
+      - type
+    columns:
+      - key
+      - summary
+      - type
+      - status
+      - totalEstimate
+      - completionPct
+      - healthStatus
 ```
 
 ---
@@ -855,24 +1086,11 @@ jira-dashboard/
 └── package.json
 ```
 
-### 8.2 Environment & Configuration
+### 8.2 Configuration
 
-**CRITICAL - Secrets Management:**
-NEVER commit credentials to version control. Use environment variables for all secrets.
+All credentials and connection settings live in `config/jira.yaml`. Add `config/jira.yaml` to `.gitignore` — never commit credentials to version control.
 
-**Environment variables (REQUIRED):**
-```bash
-export JIRA_HOST="https://yourinstance.atlassian.net"
-export JIRA_EMAIL="you@example.com"
-export JIRA_API_TOKEN="your-api-token-here"
-```
-
-Alternatively, create `.env` file (gitignored):
-```bash
-JIRA_HOST=https://yourinstance.atlassian.net
-JIRA_EMAIL=you@example.com
-JIRA_API_TOKEN=your-token-here
-```
+See the `config/jira.yaml` schema in Section 6 for the full structure.
 
 ### 8.3 Startup Command
 ```bash
@@ -884,7 +1102,7 @@ npx tsx server.ts
 2.  **Progress:** Console logs show sync progress (`Fetching PLAT: 100/500 issues...`).
 3.  **Completion:** Server starts HTTP listener after sync completes.
 4.  **Access:** Browser opens `http://localhost:3000` to view dashboards.
-5.  **Refresh:** Restart server to trigger new sync, or implement `/api/sync` endpoint for on-demand refresh.
+5.  **Refresh:** Restart the server to trigger a new sync (incremental if `cache/meta.json` exists, full if not).
 
 ### 8.5 Sync Strategies
 - **Full Sync:** Runs when `cache/meta.json` doesn't exist. Downloads entire project history.
@@ -988,16 +1206,15 @@ try {
 }
 ```
 
-**Missing Environment Variables:**
+**Missing Configuration Fields:**
 ```javascript
-function validateEnvironment() {
-  const required = ['JIRA_HOST', 'JIRA_EMAIL', 'JIRA_API_TOKEN'];
-  const missing = required.filter(key => !process.env[key]);
-  
+function validateConfig(config) {
+  const required = ['host', 'email', 'apiToken'];
+  const missing = required.filter(key => !config[key]);
+
   if (missing.length > 0) {
-    console.error('ERROR: Missing required environment variables:');
+    console.error('ERROR: Missing required fields in config/jira.yaml:');
     missing.forEach(key => console.error(`  - ${key}`));
-    console.error('\nSet them in your shell or .env file.');
     process.exit(1);
   }
 }
