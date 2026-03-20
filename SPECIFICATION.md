@@ -4,6 +4,50 @@ This is the comprehensive **Technical Requirements Document (TRD)** for the Jira
 
 # Specification: Jira Strategic Roll-up Dashboard (JSRD)
 
+## Table of Contents
+
+- [1. Project Vision](#1-project-vision)
+- [2. Technical Constraints](#2-technical-constraints)
+  - [2.1 Coding Style](#21-coding-style)
+- [3. Server-Side Architecture](#3-server-side-architecture-serverts)
+  - [3.1 The Sync Engine (Startup Logic)](#31-the-sync-engine-startup-logic)
+    - [3.1.1 Incremental Sync Strategy](#311-incremental-sync-strategy)
+    - [3.1.2 Pagination Implementation](#312-pagination-implementation)
+  - [3.2 The API Endpoints](#32-the-api-endpoints)
+  - [3.3 Cache Structure & Metadata](#33-cache-structure--metadata)
+- [4. Data Layer & Logic](#4-data-layer--logic)
+  - [4.0 Field Mapping & Normalization](#40-field-mapping--normalization)
+  - [4.1 Computed Fields (Server-Side)](#41-computed-fields-server-side)
+  - [4.2 Hierarchy Mapping & Roll-ups](#42-hierarchy-mapping--roll-ups)
+    - [4.2.1 The Org Axis](#421-the-org-axis-configorgyaml)
+    - [4.2.2 The Strategic Axis](#422-the-strategic-axis-configinitiativesyaml)
+    - [4.2.3 The Parent Link Hierarchy](#423-the-parent-link-hierarchy)
+- [5. Frontend & UI Requirements](#5-frontend--ui-requirements)
+  - [5.1 Tabbed Container System](#51-tabbed-container-system)
+  - [5.2 Interactive Features](#52-interactive-features)
+  - [5.3 Client-Side Caching & Performance](#53-client-side-caching--performance)
+- [6. Configuration Schemas (Examples)](#6-configuration-schemas-examples)
+- [7. Suggested Dashboards to Build](#7-suggested-dashboards-to-build)
+- [8. Deployment & Execution](#8-deployment--execution)
+  - [8.1 Directory Structure](#81-directory-structure)
+  - [8.2 Configuration](#82-configuration)
+  - [8.3 Startup Command](#83-startup-command)
+  - [8.4 Execution Flow](#84-execution-flow)
+  - [8.5 Sync Strategies](#85-sync-strategies)
+- [9. Error Handling & Recovery](#9-error-handling--recovery)
+  - [9.1 API Error Handling](#91-api-error-handling)
+  - [9.2 Data Integrity](#92-data-integrity)
+  - [9.3 Configuration Errors](#93-configuration-errors)
+- [10. Monitoring & Observability](#10-monitoring--observability)
+  - [10.1 Structured Logging](#101-structured-logging)
+  - [10.2 Metrics Collection](#102-metrics-collection)
+  - [10.3 Health Checks](#103-health-checks)
+- [11. Future Enhancements (Optional)](#11-future-enhancements-optional)
+  - [11.1 Multi-User Authentication](#111-multi-user-authentication)
+  - [11.2 Advanced Export Features](#112-advanced-export-features)
+
+---
+
 ## 1. Project Vision
 A high-performance, **offline-first** Jira reporting tool that runs as a Node.js service. It bypasses Jira's UI limitations and API latency by caching issues locally and using YAML-based "pivots" to map flat Jira data into Organizational and Strategic hierarchies.
 
@@ -20,6 +64,32 @@ A high-performance, **offline-first** Jira reporting tool that runs as a Node.js
 * **Secrets Management:** All credentials stored in `config/jira.yaml` (gitignored); never commit `config/jira.yaml` to version control
 * **Scale Limits:** Optimized for up to 10,000 issues
 * **Browser Support:** Modern browsers with ES2020+ support (Chrome 90+, Firefox 88+, Safari 14+)
+
+---
+
+## 2.1 Coding Style
+
+* **Readability first:** Code must be written for humans. Prefer clear, descriptive names over brevity. Avoid clever one-liners that obscure intent.
+* **Well-structured:** Each file, function, and module has a single, clear responsibility. Keep functions short and focused. Group related logic together.
+* **No `any`:** TypeScript's `any` type is forbidden everywhere — server and client. Every value must have an explicit, accurate type. Use `unknown` with a type guard when the shape is genuinely uncertain.
+* **Strong typing throughout:** Define explicit interfaces or type aliases for all data shapes — API responses, config objects, normalized issues, roll-up metrics, and UI state. Do not rely on inferred `any` from external libraries; type-assert or wrap them.
+* **Error handling — server:** All async operations must be wrapped in `try/catch`. Errors must be logged with context (operation name, relevant IDs) before being re-thrown or handled. Never silently swallow errors.
+* **Error handling — UI:** All `fetch` calls must check `response.ok` before parsing JSON. Network and parse errors must be caught and displayed to the user in the UI (e.g., an error banner), never logged-only. The UI must never show a blank page or silently fail.
+* **Assertions:** Use assertion functions (or `console.assert` in the UI) to enforce invariants that should never be violated — e.g., that a required config field is present after validation, or that a field mapping resolves to a known type. An assertion failure should throw immediately with a descriptive message rather than propagating corrupted state.
+
+```typescript
+// Example: assertion helper (server)
+function assert(condition: boolean, message: string): asserts condition {
+  if (!condition) throw new Error(`Assertion failed: ${message}`);
+}
+
+// Example: strong-typed fetch wrapper (UI)
+async function fetchJSON<T>(url: string): Promise<T> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status} from ${url}`);
+  return res.json() as Promise<T>;
+}
+```
 
 ---
 
@@ -161,17 +231,17 @@ async function fetchAllIssues(jql) {
 
 > All `/api/*` endpoints respond with `Content-Type: application/json` unless noted otherwise.
 
-* `GET /api/config`: Returns merged JSON from `dashboards.yaml`, `org.yaml`, and `initiatives.yaml`.
-* `GET /api/data`: Returns all normalized (field-mapped, `healthStatus`-computed) issues as a JSON array. Deleted issues are excluded.
-* `GET /api/data?limit=1000&offset=0`: Paginated variant; returns `{ issues: [...], total: N, offset: 0, limit: 1000 }`.
-* `GET /api/snapshots`: Returns a JSON list of all available timestamped snapshot directories.
-* `GET /api/snapshots/:timestamp`: Returns normalized data loaded from the specified historical snapshot.
-* `GET /api/fields`: Returns the parsed `field-mappings.yaml` as JSON.
-* `GET /api/health`: Returns sync status, cache age, and last error (if any) as JSON.
-* `GET /api/health/jira`: Tests Jira connectivity; returns `{ status: "connected" | "disconnected" }`.
-* `GET /api/export/csv`: Exports current cached data as `text/csv`.
-* `GET /api/export/json`: Exports current cached data as a downloadable JSON file.
-* `GET /`: Serves `public/index.html`.
+All filtering, searching, and aggregation is done **client-side** against the in-memory dataset loaded from `/api/data`. The server exposes only the endpoints the UI actually needs:
+
+| Method | Path | Description |
+|--------|------|--------------|
+| `GET` | `/api/config` | Returns merged JSON from `dashboards.yaml`, `org.yaml`, and `initiatives.yaml`. Bootstraps the UI on load. |
+| `GET` | `/api/data` | Returns all normalized issues as a flat JSON array. Includes `healthStatus` for every issue. Deleted issues are excluded. |
+| `GET` | `/api/fields` | Returns the parsed `field-mappings.yaml` as JSON. Used to resolve `type` and `label` for each field when rendering filter widgets and columns. |
+| `GET` | `/api/health` | Returns sync status, cache age, last error (if any), and issue count as JSON. Used by the UI's "Last updated" indicator. |
+| `GET` | `/api/export/csv` | Streams a `text/csv` download of the current cached dataset. |
+| `GET` | `/api/export/json` | Streams a downloadable JSON file of the current cached dataset. |
+| `GET` | `/` | Serves `public/index.html`. |
 
 ### 3.3 Cache Structure & Metadata
 The cache directory structure:
@@ -258,7 +328,7 @@ The system uses `field-mappings.yaml` to abstract Jira's field complexity:
       "tShirtSize": "M",
       "epicName": "Platform Modernization",
       "quarter": "Q2 2026",
-      "initiative": "office in Hong Kong",
+      "initiative": "Bug fixes",
       "assignee": "Alice",
       "engLead": "Bob",
       "status": "In Progress",
@@ -481,23 +551,26 @@ Maps individual issues to Team → Group → Org structure:
 ```
 
 #### 4.2.2 The Strategic Axis (`config/initiatives.yaml`)
-Maps issues to Initiative → Sub-Initiative → Goal hierarchy using the initiative field:
+Maps issues to Initiative → Goal hierarchy using the initiative field:
 
 **Mapping Logic:**
 1.  **Issue → Initiative:** Map using the `initiative` custom field value to a leaf node
     ```yaml
-    Grow Business:
-      - expand Asia:
-          - office in Hong Kong
-      - expand Europe:
-          - office in Paris
-          - office in London
-      - expand Africa:
-          - office in Cassablanca
+    KTLO:
+      - Support
+      - Bug fixes
+
+    Stability:
+      - Logging
+      - Telemetry
+
+    Investment:
+      - Development
+      - Testing
+      - QA
     ```
-2.  **Initiative → Sub-Initiative:** Hierarchical parent relationship defined in YAML
-3.  **Sub-Initiative → Goal:** Top-level strategic goal
-4.  **Unassigned Handling:** Issues without initiative field go to "No Initiative" view
+2.  **Initiative → Goal:** The list key is the top-level goal; each list item is a leaf initiative
+3.  **Unassigned Handling:** Issues without initiative field go to "No Initiative" view
 
 **Roll-up Aggregations:**
 - **Progress:** Weighted by estimate: `sum(completed_estimate) / sum(total_estimate)`
@@ -508,86 +581,37 @@ Maps issues to Initiative → Sub-Initiative → Goal hierarchy using the initia
 **Example Output:**
 ```javascript
 {
-  goal: "Grow Business",
-  subInitiatives: [
+  goal: "KTLO",
+  initiatives: [
     {
-      id: "expand-asia",
-      name: "expand Asia",
-      initiatives: [
-        {
-          id: "office-hong-kong",
-          name: "office in Hong Kong",
-          metrics: {
-            totalEstimate: 85,
-            completedEstimate: 60,
-            progress: 70.6,
-            issueCount: 28,
-            atRisk: 3
-          }
-        }
-      ],
-      metrics: {  // Rolled up from expand Asia initiatives
-        totalEstimate: 85,
-        completedEstimate: 60,
-        progress: 70.6,
-        issueCount: 28,
-        atRisk: 3
-      }
-    },
-    {
-      id: "expand-europe",
-      name: "expand Europe",
-      initiatives: [
-        {
-          id: "office-paris",
-          name: "office in Paris",
-          metrics: {
-            totalEstimate: 120,
-            completedEstimate: 85,
-            progress: 70.8,
-            issueCount: 42,
-            atRisk: 5
-          }
-        },
-        {
-          id: "office-london",
-          name: "office in London",
-          metrics: {
-            totalEstimate: 95,
-            completedEstimate: 72,
-            progress: 75.8,
-            issueCount: 35,
-            atRisk: 2
-          }
-        }
-      ],
-      metrics: {  // Rolled up from expand Europe initiatives
-        totalEstimate: 215,
-        completedEstimate: 157,
-        progress: 73.0,
-        issueCount: 77,
-        atRisk: 7
-      }
-    },
-    {
-      id: "expand-africa",
-      name: "expand Africa",
-      initiatives: [],
+      id: "support",
+      name: "Support",
       metrics: {
-        totalEstimate: 0,
-        completedEstimate: 0,
-        progress: 0,
-        issueCount: 0,
-        atRisk: 0
+        totalEstimate: 40,
+        completedEstimate: 28,
+        progress: 70.0,
+        issueCount: 15,
+        atRisk: 2
+      }
+    },
+    {
+      id: "bug-fixes",
+      name: "Bug fixes",
+      metrics: {
+        totalEstimate: 25,
+        completedEstimate: 18,
+        progress: 72.0,
+        issueCount: 10,
+        atRisk: 1
       }
     }
   ],
-  metrics: {  // Rolled up from all sub-initiatives in Grow Business goal
-    totalEstimate: 300,
-    completedEstimate: 217,
-    progress: 72.3,
-    issueCount: 105,
-    atRisk: 10
+  metrics: {  // Rolled up from all initiatives in KTLO goal
+    totalEstimate: 65,
+    completedEstimate: 46,
+    progress: 70.8,
+    issueCount: 25,
+    atRisk: 3
   }
 }
 ```
@@ -924,31 +948,20 @@ Infrastructure:
 ```
 
 ### `config/initiatives.yaml`
-Defines strategic initiative hierarchy (Goal → Sub-Initiative → Initiative):
+Defines strategic initiative hierarchy (Goal → Initiative). Top-level keys are goals; each list item is a leaf initiative matched against the issue's `initiative` field.
 ```yaml
-Grow Business:
-  expand Asia:
-    - office in Hong Kong
-    - office in Singapore
-  expand Europe:
-    - office in Paris
-    - office in London
-  expand Africa:
-    - office in Cassablanca
+KTLO:
+  - Support
+  - Bug fixes
 
-Reduce Costs:
-  cloud migration:
-    - migrate compute
-    - migrate storage
-  vendor consolidation:
-    - consolidate SaaS tools
+Stability:
+  - Logging
+  - Telemetry
 
-Improve Quality:
-  test automation:
-    - UI test coverage
-    - API test coverage
-  technical debt:
-    - legacy code refactor
+Investment:
+  - Development
+  - Testing
+  - QA
 ```
 
 ### `config/dashboards.yaml`
@@ -1275,13 +1288,11 @@ const metrics = {
 };
 ```
 
-**Export Metrics:**
-- `GET /api/metrics` returns JSON metrics
-- Optional: Prometheus-format export at `/metrics`
+**Note:** Metrics are for internal observability (logging/console) only. No `/api/metrics` endpoint is exposed.
 
 ### 10.3 Health Checks
 
-**Comprehensive Health Check:**
+**Health Check:**
 ```javascript
 app.get('/api/health', async (req, res) => {
   const health = {
@@ -1293,7 +1304,6 @@ app.get('/api/health', async (req, res) => {
       issueCount: meta.issueCount,
       sizeBytes: meta.cacheSize
     },
-    jira: null,  // Populated by /api/health/jira
     errors: meta.lastError ? [meta.lastError] : []
   };
   
@@ -1304,23 +1314,6 @@ app.get('/api/health', async (req, res) => {
   }
   
   res.json(health);
-});
-
-app.get('/api/health/jira', async (req, res) => {
-  try {
-    // Test Jira connectivity
-    const response = await jiraClient.getServerInfo();
-    res.json({
-      status: 'connected',
-      version: response.version,
-      baseUrl: response.baseUrl
-    });
-  } catch (error) {
-    res.status(503).json({
-      status: 'disconnected',
-      error: error.message
-    });
-  }
 });
 ```
 
