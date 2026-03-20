@@ -9,8 +9,8 @@
   --color-primary-hover: #0550ae;
   --color-green: #1a7f37;
   --color-green-bg: #dafbe1;
-  --color-yellow: #9a6700;
-  --color-yellow-bg: #fff8c5;
+  --color-yellow: #e08700;
+  --color-yellow-bg: #fff3d5;
   --color-red: #cf222e;
   --color-red-bg: #ffebe9;
   --color-shadow: rgba(0, 0, 0, 0.08);
@@ -323,6 +323,20 @@ table.data-table tr:hover {
   display: flex;
   flex-direction: column;
   align-items: center;
+}
+
+.metric.health-summary {
+  flex-direction: row;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.health-pair {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 1.3rem;
+  font-weight: 700;
 }
 
 .metric-value {

@@ -180,7 +180,7 @@ async function syncFromJira() {
     btn.textContent = 'Syncing…';
   }
   try {
-    const resp = await fetch('/api/sync', { method: 'POST' });
+    const resp = await fetch('/api/sync?full=true', { method: 'POST' });
     if (!resp.ok) {
       const body = await resp.json().catch(() => ({}));
       throw new Error(body.error || `HTTP ${resp.status}`);
@@ -656,159 +656,351 @@ function formatCellValue(/** @type {unknown} */ val) {
   return String(val);
 }
 
+// ─── Shared: build an issue table from dashboard columns ─────────────────────
+
+function buildIssueTable(/** @type {Array<Record<string,unknown>>} */ issues, /** @type {string[]} */ columns) {
+  const wrap = document.createElement('div');
+  wrap.className = 'data-table-wrap';
+
+  const table = document.createElement('table');
+  table.className = 'data-table';
+
+  const thead = document.createElement('thead');
+  const headerRow = document.createElement('tr');
+  for (const col of columns) {
+    const th = document.createElement('th');
+    const mapping = fieldMappings[col];
+    th.textContent = mapping ? mapping.label : col;
+    headerRow.appendChild(th);
+  }
+  thead.appendChild(headerRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  for (const issue of issues) {
+    const tr = document.createElement('tr');
+    for (const col of columns) {
+      const td = document.createElement('td');
+      if (col === 'healthStatus') {
+        const badge = document.createElement('span');
+        badge.className = `health-badge ${issue.healthStatus}`;
+        td.appendChild(badge);
+        td.append(String(issue.healthReason ?? ''));
+      } else {
+        td.textContent = formatCellValue(issue[col]);
+      }
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+  return wrap;
+}
+
+// ─── Shared: build a stats header bar ────────────────────────────────────────
+
+function buildStatsHeader(/** @type {Array<Record<string,unknown>>} */ issues) {
+  const statsDiv = document.createElement('div');
+  statsDiv.className = 'rollup-metrics';
+
+  let totalEstimate = 0;
+  let redCount = 0;
+  let yellowCount = 0;
+  let greenCount = 0;
+  for (const issue of issues) {
+    totalEstimate += typeof issue.estimate === 'number' ? issue.estimate : 0;
+    if (issue.healthStatus === 'red') redCount++;
+    else if (issue.healthStatus === 'yellow') yellowCount++;
+    else greenCount++;
+  }
+
+  const statItems = [
+    { label: 'Issues', value: issues.length },
+    { label: 'Estimate', value: totalEstimate },
+  ];
+
+  for (const s of statItems) {
+    const m = document.createElement('div');
+    m.className = 'metric';
+    const mv = document.createElement('span');
+    mv.className = 'metric-value';
+    mv.textContent = String(s.value);
+    const ml = document.createElement('span');
+    ml.className = 'metric-label';
+    ml.textContent = s.label;
+    m.appendChild(mv);
+    m.appendChild(ml);
+    statsDiv.appendChild(m);
+  }
+
+  const healthMetric = document.createElement('div');
+  healthMetric.className = 'metric health-summary';
+  const counts = [
+    { color: 'green', count: greenCount },
+    { color: 'yellow', count: yellowCount },
+    { color: 'red', count: redCount },
+  ];
+  for (const c of counts) {
+    const pair = document.createElement('span');
+    pair.className = 'health-pair';
+    const badge = document.createElement('span');
+    badge.className = `health-badge ${c.color}`;
+    pair.appendChild(badge);
+    pair.append(String(c.count));
+    healthMetric.appendChild(pair);
+  }
+  statsDiv.appendChild(healthMetric);
+
+  return statsDiv;
+}
+
 // ─── Org Roll-up View ─────────────────────────────────────────────────────────
 
 async function renderOrgView(/** @type {HTMLElement} */ container) {
+  const dash = getActiveDashboard();
+  if (!dash) return;
+
+  const issues = getFilteredIssues();
+
+  if (issues.length === 0) {
+    container.innerHTML = '<div class="empty-state">No issues match the current filters.</div>';
+    return;
+  }
+
+  // Fetch org config to get the org → group → team hierarchy
+  let orgData;
   try {
-    const data = await fetchJSON('/api/rollup/org');
-    const orgNodes = /** @type {Array<Record<string,unknown>>} */ (data);
+    orgData = await fetchJSON('/api/rollup/org');
+  } catch (_) {
+    orgData = [];
+  }
+  const orgNodes = /** @type {Array<Record<string,unknown>>} */ (orgData);
 
-    if (orgNodes.length === 0) {
-      container.innerHTML = '<div class="empty-state">No org data available.</div>';
-      return;
-    }
+  // Build team → issues lookup from filtered issues
+  /** @type {Map<string, Array<Record<string,unknown>>>} */
+  const byTeam = new Map();
+  for (const issue of issues) {
+    const team = String(issue.team ?? '').toLowerCase();
+    if (!byTeam.has(team)) byTeam.set(team, []);
+    byTeam.get(team).push(issue);
+  }
 
-    const grid = document.createElement('div');
-    grid.className = 'rollup-grid';
-
+  if (orgNodes.length > 0) {
+    // Render using org hierarchy structure
     for (const org of orgNodes) {
+      const orgCard = document.createElement('div');
+      orgCard.className = 'rollup-card';
+
+      const h2 = document.createElement('h2');
+      h2.textContent = /** @type {string} */ (org.org);
+      orgCard.appendChild(h2);
+
+      // Collect all issues for this org
+      const orgIssues = [];
+      const groups = /** @type {Array<Record<string,unknown>>} */ (org.groups);
+      for (const group of groups) {
+        const teams = /** @type {Array<Record<string,unknown>>} */ (group.teams);
+        for (const team of teams) {
+          const teamName = /** @type {string} */ (team.name).toLowerCase();
+          const teamIssues = byTeam.get(teamName) ?? [];
+          orgIssues.push(...teamIssues);
+        }
+      }
+      orgCard.appendChild(buildStatsHeader(orgIssues));
+
+      for (const group of groups) {
+        const h3 = document.createElement('h3');
+        h3.textContent = /** @type {string} */ (group.name);
+        orgCard.appendChild(h3);
+
+        const teams = /** @type {Array<Record<string,unknown>>} */ (group.teams);
+        for (const team of teams) {
+          const teamName = /** @type {string} */ (team.name);
+          const teamIssues = byTeam.get(teamName.toLowerCase()) ?? [];
+          if (teamIssues.length === 0) continue;
+
+          const teamSection = document.createElement('div');
+          teamSection.className = 'team-section';
+
+          const h4 = document.createElement('h4');
+          h4.textContent = teamName;
+          teamSection.appendChild(h4);
+          teamSection.appendChild(buildStatsHeader(teamIssues));
+          teamSection.appendChild(buildIssueTable(teamIssues, dash.columns));
+
+          orgCard.appendChild(teamSection);
+        }
+      }
+
+      container.appendChild(orgCard);
+    }
+  } else {
+    // Fallback: group by team field directly
+    const sortedTeams = [...byTeam.keys()].sort();
+    for (const teamKey of sortedTeams) {
+      const teamIssues = byTeam.get(teamKey);
       const card = document.createElement('div');
       card.className = 'rollup-card';
 
       const h2 = document.createElement('h2');
-      h2.textContent = /** @type {string} */ (org.org);
+      h2.textContent = teamKey || '(No Team)';
       card.appendChild(h2);
+      card.appendChild(buildStatsHeader(teamIssues));
+      card.appendChild(buildIssueTable(teamIssues, dash.columns));
 
-      card.appendChild(renderMetrics(/** @type {Record<string,unknown>} */ (org.metrics)));
-
-      const groups = /** @type {Array<Record<string,unknown>>} */ (org.groups);
-      for (const group of groups) {
-        const h3 = document.createElement('h3');
-        h3.textContent = /** @type {string} */ (group.name);
-        card.appendChild(h3);
-
-        card.appendChild(renderMetrics(/** @type {Record<string,unknown>} */ (group.metrics)));
-
-        const teams = /** @type {Array<Record<string,unknown>>} */ (group.teams);
-        const teamTable = document.createElement('table');
-        teamTable.className = 'data-table';
-        teamTable.style.marginTop = '0.5rem';
-
-        const thead = document.createElement('thead');
-        const headerRow = document.createElement('tr');
-        for (const col of ['Team', 'Issues', 'Estimate', 'Complete %', 'Health']) {
-          const th = document.createElement('th');
-          th.textContent = col;
-          headerRow.appendChild(th);
-        }
-        thead.appendChild(headerRow);
-        teamTable.appendChild(thead);
-
-        const tbody = document.createElement('tbody');
-        for (const team of teams) {
-          const metrics = /** @type {Record<string,unknown>} */ (team.metrics);
-          const healthCounts = /** @type {Record<string,number>} */ (metrics.healthCounts);
-          const tr = document.createElement('tr');
-
-          addCell(tr, /** @type {string} */ (team.name));
-          addCell(tr, String(metrics.issueCount));
-          addCell(tr, String(metrics.totalEstimate));
-          addCell(tr, `${metrics.completionPct}%`);
-          const td = document.createElement('td');
-          td.innerHTML =
-            `<span class="health-badge green"></span>${healthCounts.green} ` +
-            `<span class="health-badge yellow"></span>${healthCounts.yellow} ` +
-            `<span class="health-badge red"></span>${healthCounts.red}`;
-          tr.appendChild(td);
-
-          tbody.appendChild(tr);
-        }
-        teamTable.appendChild(tbody);
-        card.appendChild(teamTable);
-      }
-
-      grid.appendChild(card);
+      container.appendChild(card);
     }
-
-    container.appendChild(grid);
-  } catch (err) {
-    showError('Failed to load org data: ' + (err instanceof Error ? err.message : String(err)));
   }
 }
 
 // ─── Initiative Roll-up View ──────────────────────────────────────────────────
 
 async function renderInitiativeView(/** @type {HTMLElement} */ container) {
-  try {
-    const data = await fetchJSON('/api/rollup/initiative');
-    const goals = /** @type {Array<Record<string,unknown>>} */ (data);
+  const dash = getActiveDashboard();
+  if (!dash) return;
 
-    if (goals.length === 0) {
-      container.innerHTML = '<div class="empty-state">No initiative data available.</div>';
-      return;
+  const issues = getFilteredIssues();
+
+  if (issues.length === 0) {
+    container.innerHTML = '<div class="empty-state">No issues match the current filters.</div>';
+    return;
+  }
+
+  // Fetch initiative config to get goal → initiative hierarchy
+  let goalData;
+  try {
+    goalData = await fetchJSON('/api/rollup/initiative');
+  } catch (_) {
+    goalData = [];
+  }
+  const goals = /** @type {Array<Record<string,unknown>>} */ (goalData);
+
+  // Build initiative → issues lookup from filtered issues
+  /** @type {Map<string, Array<Record<string,unknown>>>} */
+  const byInitiative = new Map();
+  const unmatched = [];
+  for (const issue of issues) {
+    const init = String(issue.initiative ?? '').toLowerCase();
+    if (init) {
+      if (!byInitiative.has(init)) byInitiative.set(init, []);
+      byInitiative.get(init).push(issue);
+    } else {
+      unmatched.push(issue);
+    }
+  }
+
+  // Track which byInitiative keys have been rendered
+  const rendered = new Set();
+
+  if (goals.length > 0) {
+    for (const goal of goals) {
+      const goalCard = document.createElement('div');
+      goalCard.className = 'rollup-card';
+
+      const goalName = /** @type {string} */ (goal.goal);
+      const h2 = document.createElement('h2');
+      h2.textContent = goalName;
+      goalCard.appendChild(h2);
+
+      // Collect issues matching sub-initiative names OR the goal name itself
+      const goalIssues = [];
+      const initiatives = /** @type {Array<Record<string,unknown>>} */ (goal.initiatives);
+      for (const init of initiatives) {
+        const initName = /** @type {string} */ (init.name).toLowerCase();
+        const initIssues = byInitiative.get(initName) ?? [];
+        goalIssues.push(...initIssues);
+        if (initIssues.length > 0) rendered.add(initName);
+      }
+      // Also include issues whose initiative value matches the goal name
+      const goalDirectIssues = byInitiative.get(goalName.toLowerCase()) ?? [];
+      goalIssues.push(...goalDirectIssues);
+      if (goalDirectIssues.length > 0) rendered.add(goalName.toLowerCase());
+
+      goalCard.appendChild(buildStatsHeader(goalIssues));
+
+      // Render sub-initiative sections
+      for (const init of initiatives) {
+        const initName = /** @type {string} */ (init.name);
+        const initIssues = byInitiative.get(initName.toLowerCase()) ?? [];
+        if (initIssues.length === 0) continue;
+
+        const initSection = document.createElement('div');
+        initSection.className = 'team-section';
+
+        const h3 = document.createElement('h3');
+        h3.textContent = initName;
+        initSection.appendChild(h3);
+        initSection.appendChild(buildStatsHeader(initIssues));
+        initSection.appendChild(buildIssueTable(initIssues, dash.columns));
+
+        goalCard.appendChild(initSection);
+      }
+
+      // Render issues matching the goal name directly (not a sub-initiative)
+      if (goalDirectIssues.length > 0) {
+        const directSection = document.createElement('div');
+        directSection.className = 'team-section';
+
+        const h3 = document.createElement('h3');
+        h3.textContent = goalName + ' (General)';
+        directSection.appendChild(h3);
+        directSection.appendChild(buildStatsHeader(goalDirectIssues));
+        directSection.appendChild(buildIssueTable(goalDirectIssues, dash.columns));
+
+        goalCard.appendChild(directSection);
+      }
+
+      container.appendChild(goalCard);
     }
 
-    const grid = document.createElement('div');
-    grid.className = 'rollup-grid';
+    // Show issues with initiative values that didn't match any goal or sub-initiative
+    const otherKeys = [...byInitiative.keys()].filter((k) => !rendered.has(k)).sort();
+    if (otherKeys.length > 0) {
+      for (const initKey of otherKeys) {
+        const initIssues = byInitiative.get(initKey);
+        const card = document.createElement('div');
+        card.className = 'rollup-card';
 
-    for (const goal of goals) {
+        const h2 = document.createElement('h2');
+        h2.textContent = initKey;
+        card.appendChild(h2);
+        card.appendChild(buildStatsHeader(initIssues));
+        card.appendChild(buildIssueTable(initIssues, dash.columns));
+
+        container.appendChild(card);
+      }
+    }
+  } else {
+    // Fallback: group by initiative field directly
+    const sortedInits = [...byInitiative.keys()].sort();
+    for (const initKey of sortedInits) {
+      const initIssues = byInitiative.get(initKey);
       const card = document.createElement('div');
       card.className = 'rollup-card';
 
       const h2 = document.createElement('h2');
-      h2.textContent = /** @type {string} */ (goal.goal);
+      h2.textContent = initKey || '(No Initiative)';
       card.appendChild(h2);
+      card.appendChild(buildStatsHeader(initIssues));
+      card.appendChild(buildIssueTable(initIssues, dash.columns));
 
-      const goalMetrics = /** @type {Record<string,unknown>} */ (goal.metrics);
-      card.appendChild(renderProgressMetrics(goalMetrics));
-
-      const initiatives = /** @type {Array<Record<string,unknown>>} */ (goal.initiatives);
-      const table = document.createElement('table');
-      table.className = 'data-table';
-      table.style.marginTop = '0.5rem';
-
-      const thead = document.createElement('thead');
-      const headerRow = document.createElement('tr');
-      for (const col of ['Initiative', 'Issues', 'Estimate', 'Progress', 'At Risk']) {
-        const th = document.createElement('th');
-        th.textContent = col;
-        headerRow.appendChild(th);
-      }
-      thead.appendChild(headerRow);
-      table.appendChild(thead);
-
-      const tbody = document.createElement('tbody');
-      for (const init of initiatives) {
-        const metrics = /** @type {Record<string,unknown>} */ (init.metrics);
-        const tr = document.createElement('tr');
-
-        addCell(tr, /** @type {string} */ (init.name));
-        addCell(tr, String(metrics.issueCount));
-        addCell(tr, String(metrics.totalEstimate));
-
-        const progTd = document.createElement('td');
-        progTd.innerHTML = renderProgressBar(/** @type {number} */ (metrics.progress)) + ` ${metrics.progress}%`;
-        tr.appendChild(progTd);
-
-        const riskTd = document.createElement('td');
-        const atRisk = /** @type {number} */ (metrics.atRisk);
-        if (atRisk > 0) {
-          riskTd.innerHTML = `<span class="health-badge red"></span>${atRisk}`;
-        } else {
-          riskTd.textContent = '0';
-        }
-        tr.appendChild(riskTd);
-
-        tbody.appendChild(tr);
-      }
-      table.appendChild(tbody);
-      card.appendChild(table);
-      grid.appendChild(card);
+      container.appendChild(card);
     }
+  }
 
-    container.appendChild(grid);
-  } catch (err) {
-    showError('Failed to load initiative data: ' + (err instanceof Error ? err.message : String(err)));
+  // Show issues with no initiative value
+  if (unmatched.length > 0) {
+    const card = document.createElement('div');
+    card.className = 'rollup-card';
+
+    const h2 = document.createElement('h2');
+    h2.textContent = '(No Initiative)';
+    card.appendChild(h2);
+    card.appendChild(buildStatsHeader(unmatched));
+    card.appendChild(buildIssueTable(unmatched, dash.columns));
+
+    container.appendChild(card);
   }
 }
 
@@ -817,138 +1009,189 @@ async function renderInitiativeView(/** @type {HTMLElement} */ container) {
 // ─── Project Roll-up View ─────────────────────────────────────────────────────
 
 async function renderProjectView(/** @type {HTMLElement} */ container) {
-  try {
-    const data = await fetchJSON('/api/rollup/project');
-    const projects = /** @type {Array<Record<string,unknown>>} */ (data);
+  const dash = getActiveDashboard();
+  if (!dash) return;
 
-    if (projects.length === 0) {
-      container.innerHTML = '<div class="empty-state">No project data available.</div>';
-      return;
-    }
+  const issues = getFilteredIssues();
 
-    const grid = document.createElement('div');
-    grid.className = 'rollup-grid';
+  if (issues.length === 0) {
+    container.innerHTML = '<div class="empty-state">No issues match the current filters.</div>';
+    return;
+  }
 
-    for (const proj of projects) {
-      const card = document.createElement('div');
-      card.className = 'rollup-card';
+  // Group issues by project key
+  /** @type {Map<string, Array<Record<string,unknown>>>} */
+  const byProject = new Map();
+  for (const issue of issues) {
+    const proj = String(issue.key ?? '').split('-')[0];
+    if (!byProject.has(proj)) byProject.set(proj, []);
+    byProject.get(proj).push(issue);
+  }
 
-      const h2 = document.createElement('h2');
-      h2.textContent = /** @type {string} */ (proj.project);
-      card.appendChild(h2);
+  const sortedProjects = [...byProject.keys()].sort();
 
-      const metrics = /** @type {Record<string,unknown>} */ (proj.metrics);
-      card.appendChild(renderMetrics(metrics));
+  for (const proj of sortedProjects) {
+    const projectIssues = byProject.get(proj);
 
-      const healthCounts = /** @type {Record<string,number>} */ (metrics.healthCounts);
-      const healthDiv = document.createElement('div');
-      healthDiv.className = 'health-summary';
-      healthDiv.innerHTML =
-        `<span class="health-badge green"></span>${healthCounts.green} ` +
-        `<span class="health-badge yellow"></span>${healthCounts.yellow} ` +
-        `<span class="health-badge red"></span>${healthCounts.red}`;
-      card.appendChild(healthDiv);
+    const section = document.createElement('div');
+    section.className = 'rollup-card';
 
-      grid.appendChild(card);
-    }
+    const h2 = document.createElement('h2');
+    h2.textContent = proj;
+    section.appendChild(h2);
 
-    container.appendChild(grid);
-  } catch (err) {
-    showError('Failed to load project data: ' + (err instanceof Error ? err.message : String(err)));
+    section.appendChild(buildStatsHeader(projectIssues));
+    section.appendChild(buildIssueTable(projectIssues, dash.columns));
+
+    container.appendChild(section);
   }
 }
 
 // ─── Hierarchy View ───────────────────────────────────────────────────────────
 
 async function renderHierarchyView(/** @type {HTMLElement} */ container) {
-  try {
-    const data = await fetchJSON('/api/rollup/hierarchy');
-    const roots = /** @type {Array<Record<string,unknown>>} */ (data);
+  const dash = getActiveDashboard();
+  if (!dash) return;
 
-    if (roots.length === 0) {
-      container.innerHTML = '<div class="empty-state">No hierarchy data available.</div>';
-      return;
-    }
+  const issues = getFilteredIssues();
 
-    const tree = document.createElement('div');
-    tree.className = 'hierarchy-tree';
-
-    for (const root of roots) {
-      tree.appendChild(buildHierarchyNode(root, true));
-    }
-
-    container.appendChild(tree);
-  } catch (err) {
-    showError('Failed to load hierarchy data: ' + (err instanceof Error ? err.message : String(err)));
-  }
-}
-
-function buildHierarchyNode(/** @type {Record<string,unknown>} */ node, /** @type {boolean} */ isRoot) {
-  const children = /** @type {Array<Record<string,unknown>>} */ (node.children ?? []);
-  const metrics = /** @type {Record<string,unknown>} */ (node.metrics ?? {});
-  const hasChildren = children.length > 0;
-
-  const wrapper = document.createElement('div');
-  wrapper.className = `hierarchy-node${isRoot ? ' root' : ''}`;
-
-  // Row
-  const row = document.createElement('div');
-  row.className = 'hierarchy-row';
-
-  // Toggle
-  const toggle = document.createElement('span');
-  toggle.className = 'hierarchy-toggle';
-  toggle.textContent = hasChildren ? '▾' : ' ';
-  row.appendChild(toggle);
-
-  // Key
-  const keySpan = document.createElement('span');
-  keySpan.className = 'hierarchy-key';
-  keySpan.textContent = /** @type {string} */ (node.key);
-  row.appendChild(keySpan);
-
-  // Type badge
-  const typeBadge = document.createElement('span');
-  typeBadge.className = 'hierarchy-type';
-  typeBadge.textContent = /** @type {string} */ (node.issueType);
-  row.appendChild(typeBadge);
-
-  // Summary
-  const summary = document.createElement('span');
-  summary.className = 'hierarchy-summary';
-  summary.textContent = /** @type {string} */ (node.summary);
-  row.appendChild(summary);
-
-  // Metrics
-  const metricsSpan = document.createElement('span');
-  metricsSpan.className = 'hierarchy-metrics';
-  const healthVal = /** @type {string} */ (metrics.healthStatus ?? 'green');
-  metricsSpan.innerHTML =
-    `<span class="health-badge ${healthVal}"></span>` +
-    `${metrics.completionPct ?? 0}% · ${metrics.issueCount ?? 0} issues · est: ${metrics.totalEstimate ?? 0}`;
-  row.appendChild(metricsSpan);
-
-  wrapper.appendChild(row);
-
-  // Children
-  if (hasChildren) {
-    const childContainer = document.createElement('div');
-    childContainer.className = 'hierarchy-children';
-
-    for (const child of children) {
-      childContainer.appendChild(buildHierarchyNode(child, false));
-    }
-
-    wrapper.appendChild(childContainer);
-
-    // Toggle expand/collapse
-    row.addEventListener('click', () => {
-      const isCollapsed = childContainer.classList.toggle('collapsed');
-      toggle.textContent = isCollapsed ? '▸' : '▾';
-    });
+  if (issues.length === 0) {
+    container.innerHTML = '<div class="empty-state">No issues match the current filters.</div>';
+    return;
   }
 
-  return wrapper;
+  // Build parent→children map from filtered issues
+  /** @type {Map<string, Record<string,unknown>>} */
+  const issueMap = new Map();
+  for (const issue of issues) issueMap.set(String(issue.key), issue);
+
+  /** @type {Map<string, string[]>} */
+  const childrenMap = new Map();
+  /** @type {Set<string>} */
+  const hasParent = new Set();
+
+  for (const issue of issues) {
+    const parentKey = issue.parent ? String(issue.parent) : null;
+    if (parentKey && issueMap.has(parentKey)) {
+      hasParent.add(String(issue.key));
+      if (!childrenMap.has(parentKey)) childrenMap.set(parentKey, []);
+      childrenMap.get(parentKey).push(String(issue.key));
+    }
+  }
+
+  const rootKeys = issues.filter((i) => !hasParent.has(String(i.key))).map((i) => String(i.key));
+
+  // Build table
+  const wrap = document.createElement('div');
+  wrap.className = 'data-table-wrap';
+
+  const table = document.createElement('table');
+  table.className = 'data-table hierarchy-table';
+
+  const thead = document.createElement('thead');
+  const headerRow = document.createElement('tr');
+  for (const col of dash.columns) {
+    const th = document.createElement('th');
+    const mapping = fieldMappings[col];
+    th.textContent = mapping ? mapping.label : col;
+    headerRow.appendChild(th);
+  }
+  thead.appendChild(headerRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+
+  function addHierarchyRows(/** @type {string} */ key, /** @type {number} */ depth) {
+    const issue = issueMap.get(key);
+    if (!issue) return;
+
+    const children = childrenMap.get(key) ?? [];
+    const hasChildren = children.length > 0;
+
+    const tr = document.createElement('tr');
+    tr.dataset.depth = String(depth);
+
+    for (let i = 0; i < dash.columns.length; i++) {
+      const col = dash.columns[i];
+      const td = document.createElement('td');
+
+      if (col === 'healthStatus') {
+        const badge = document.createElement('span');
+        badge.className = `health-badge ${issue.healthStatus}`;
+        td.appendChild(badge);
+        td.append(String(issue.healthReason ?? ''));
+      } else {
+        // First column gets indentation and toggle
+        if (i === 0) {
+          const indent = document.createElement('span');
+          indent.style.paddingLeft = `${depth * 1.2}rem`;
+          td.appendChild(indent);
+
+          if (hasChildren) {
+            const toggle = document.createElement('span');
+            toggle.className = 'hierarchy-toggle';
+            toggle.textContent = '▾';
+            toggle.addEventListener('click', (e) => {
+              e.stopPropagation();
+              const isCollapsed = toggle.textContent === '▸';
+              toggle.textContent = isCollapsed ? '▾' : '▸';
+              // Show/hide descendant rows
+              let sibling = tr.nextElementSibling;
+              while (sibling) {
+                const sibDepth = Number(/** @type {HTMLElement} */ (sibling).dataset.depth);
+                if (sibDepth <= depth) break;
+                /** @type {HTMLElement} */ (sibling).style.display = isCollapsed ? '' : 'none';
+                // When expanding, only show immediate children (not collapsed subtrees)
+                if (isCollapsed && sibDepth > depth + 1) {
+                  /** @type {HTMLElement} */ (sibling).style.display = 'none';
+                }
+                sibling = sibling.nextElementSibling;
+              }
+              // Reset child toggles when collapsing
+              if (!isCollapsed) {
+                let s = tr.nextElementSibling;
+                while (s) {
+                  const sDepth = Number(/** @type {HTMLElement} */ (s).dataset.depth);
+                  if (sDepth <= depth) break;
+                  const childToggle = s.querySelector('.hierarchy-toggle');
+                  if (childToggle) childToggle.textContent = '▸';
+                  s = s.nextElementSibling;
+                }
+              }
+            });
+            td.appendChild(toggle);
+          } else {
+            const spacer = document.createElement('span');
+            spacer.style.display = 'inline-block';
+            spacer.style.width = '1rem';
+            td.appendChild(spacer);
+          }
+
+          const text = document.createElement('span');
+          text.textContent = formatCellValue(issue[col]);
+          td.appendChild(text);
+        } else {
+          td.textContent = formatCellValue(issue[col]);
+        }
+      }
+
+      tr.appendChild(td);
+    }
+
+    tbody.appendChild(tr);
+
+    for (const childKey of children) {
+      addHierarchyRows(childKey, depth + 1);
+    }
+  }
+
+  for (const rootKey of rootKeys) {
+    addHierarchyRows(rootKey, 0);
+  }
+
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+  container.appendChild(wrap);
 }
 
 // ─── Render Helpers ───────────────────────────────────────────────────────────

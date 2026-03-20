@@ -397,6 +397,7 @@ function formatBytes(bytes: number): string {
 
 async function performSync(
   config: ReturnType<typeof loadConfig>,
+  forceFullSync = false,
 ): Promise<JiraRawIssue[]> {
   const { jira, projects } = config;
   const client = createJiraClient(jira);
@@ -429,7 +430,7 @@ async function performSync(
     ? projects.projects.some((p) => !fs.existsSync(path.resolve(__dirname, meta.snapshotPath, `${p}.json`)))
     : false;
 
-  const needsFullSync = projectsChanged || snapshotMissing;
+  const needsFullSync = forceFullSync || projectsChanged || snapshotMissing;
 
   if (projectsChanged) {
     log('info', 'Project list changed — forcing full sync', {
@@ -529,6 +530,24 @@ async function performSync(
     lastError: null,
     cacheSize,
   });
+
+  // Clean up old snapshots — keep the latest 3
+  try {
+    const entries = fs.readdirSync(CACHE_DIR, { withFileTypes: true });
+    const snapshots = entries
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .sort();
+    const toDelete = snapshots.slice(0, -3);
+    for (const name of toDelete) {
+      fs.rmSync(path.join(CACHE_DIR, name), { recursive: true, force: true });
+    }
+    if (toDelete.length > 0) {
+      log('info', 'Cleaned up old snapshots', { deleted: toDelete.length, kept: snapshots.length - toDelete.length });
+    }
+  } catch (err) {
+    log('warn', 'Failed to clean up old snapshots', { error: err instanceof Error ? err.message : String(err) });
+  }
 
   log('info', 'Sync complete', { issues: allRawIssues.length, duration: syncDuration, snapshot: snapshotName });
   return allRawIssues;
@@ -976,15 +995,16 @@ async function main(): Promise<void> {
   });
 
   // API: Trigger re-sync from Jira
-  app.post('/api/sync', async (_req: Request, res: Response) => {
+  app.post('/api/sync', async (req: Request, res: Response) => {
     if (syncInProgress) {
       res.status(409).json({ error: 'Sync already in progress' });
       return;
     }
     syncInProgress = true;
+    const forceFullSync = req.query.full === 'true';
     try {
-      log('info', 'Manual sync triggered');
-      cachedRawIssues = await performSync(config);
+      log('info', 'Manual sync triggered', { full: forceFullSync });
+      cachedRawIssues = await performSync(config, forceFullSync);
       recomputeFromRaw();
       const meta = loadMeta();
       res.json({ success: true, issueCount: cachedIssues.length, lastSync: meta?.lastSync });

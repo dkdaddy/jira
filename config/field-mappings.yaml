@@ -96,7 +96,7 @@ engLead:
   label: "Eng Lead"
 
 initiative:
-  path: "customfield_10050"
+  path: "customfield_10076"
   type: dropdown
   label: "Initiative"
 

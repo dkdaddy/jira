@@ -7,6 +7,7 @@ dashboards:
       - project
       - status
       - priority
+      - initiative
       - team
       - assignee
       - quarter
@@ -15,6 +16,7 @@ dashboards:
       - summary
       - type
       - status
+      - initiative
       - priority
       - assignee
       - team
@@ -51,13 +53,19 @@ dashboards:
     filterWidgets:
       - project
       - status
+      - priority
       - quarter
+      - assignee
     columns:
-      - team
-      - issueCount
-      - totalEstimate
-      - completionPct
-      - healthCounts
+      - key
+      - summary
+      - type
+      - status
+      - priority
+      - assignee
+      - estimate
+      - quarter
+      - healthStatus
 
   - id: "by-initiative"
     title: "By Initiative"
@@ -66,13 +74,20 @@ dashboards:
     filterWidgets:
       - project
       - status
+      - priority
       - quarter
+      - assignee
     columns:
+      - key
+      - summary
+      - type
       - initiative
-      - issueCount
-      - totalEstimate
-      - progress
-      - atRisk
+      - status
+      - priority
+      - assignee
+      - estimate
+      - quarter
+      - healthStatus
 
   - id: "hierarchy"
     title: "Parent-Child Hierarchy"
@@ -89,8 +104,9 @@ dashboards:
       - summary
       - type
       - status
-      - totalEstimate
-      - completionPct
+      - priority
+      - assignee
+      - estimate
       - quarter
       - startDate
       - healthStatus
@@ -101,10 +117,18 @@ dashboards:
     baseFilter: ""
     filterWidgets:
       - status
+      - priority
+      - team
       - quarter
+      - assignee
     columns:
-      - project
-      - issueCount
-      - totalEstimate
-      - completionPct
-      - healthCounts
+      - key
+      - summary
+      - type
+      - status
+      - priority
+      - assignee
+      - team
+      - estimate
+      - quarter
+      - healthStatus
