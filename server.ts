@@ -256,8 +256,18 @@ function createJiraClient(config: JiraConfig) {
       maxResults: String(maxResults),
       fields: '*all',
     });
-    const url = `${baseUrl}/rest/api/3/search?${params.toString()}`;
-    return (await fetchWithRetry(url)) as JiraSearchResponse;
+    const url = `${baseUrl}/rest/api/3/search/jql?${params.toString()}`;
+    const response = (await fetchWithRetry(url)) as any;
+    
+    // Handle different response structures from the new API
+    const normalized: JiraSearchResponse = {
+      startAt: response.startAt ?? startAt,
+      maxResults: response.maxResults ?? maxResults,
+      total: response.total ?? response.totalResults ?? response.issues?.length ?? 0,
+      issues: response.issues ?? [],
+    };
+    
+    return normalized;
   }
 
   return { fetchFields, searchIssues };
