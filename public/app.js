@@ -877,12 +877,20 @@ async function renderInitiativeView(/** @type {HTMLElement} */ container) {
   const goals = /** @type {Array<Record<string,unknown>>} */ (goalData);
 
   // Build initiative → issues lookup from filtered issues
+  // Build set of valid leaf initiative names from goals config
+  const leafNames = new Set();
+  for (const goal of goals) {
+    for (const init of goal.initiatives) {
+      leafNames.add(/** @type {string} */ (init.name).toLowerCase());
+    }
+  }
+
   /** @type {Map<string, Array<Record<string,unknown>>>} */
   const byInitiative = new Map();
   const unmatched = [];
   for (const issue of issues) {
     const init = String(issue.initiative ?? '').toLowerCase();
-    if (init) {
+    if (init && leafNames.has(init)) {
       if (!byInitiative.has(init)) byInitiative.set(init, []);
       byInitiative.get(init).push(issue);
     } else {
@@ -903,7 +911,7 @@ async function renderInitiativeView(/** @type {HTMLElement} */ container) {
       h2.textContent = goalName;
       goalCard.appendChild(h2);
 
-      // Collect issues matching sub-initiative names OR the goal name itself
+      // Collect issues matching sub-initiative leaf names only
       const goalIssues = [];
       const initiatives = /** @type {Array<Record<string,unknown>>} */ (goal.initiatives);
       for (const init of initiatives) {
@@ -912,10 +920,6 @@ async function renderInitiativeView(/** @type {HTMLElement} */ container) {
         goalIssues.push(...initIssues);
         if (initIssues.length > 0) rendered.add(initName);
       }
-      // Also include issues whose initiative value matches the goal name
-      const goalDirectIssues = byInitiative.get(goalName.toLowerCase()) ?? [];
-      goalIssues.push(...goalDirectIssues);
-      if (goalDirectIssues.length > 0) rendered.add(goalName.toLowerCase());
 
       goalCard.appendChild(buildStatsHeader(goalIssues));
 
@@ -935,20 +939,6 @@ async function renderInitiativeView(/** @type {HTMLElement} */ container) {
         initSection.appendChild(buildIssueTable(initIssues, dash.columns));
 
         goalCard.appendChild(initSection);
-      }
-
-      // Render issues matching the goal name directly (not a sub-initiative)
-      if (goalDirectIssues.length > 0) {
-        const directSection = document.createElement('div');
-        directSection.className = 'team-section';
-
-        const h3 = document.createElement('h3');
-        h3.textContent = goalName + ' (General)';
-        directSection.appendChild(h3);
-        directSection.appendChild(buildStatsHeader(goalDirectIssues));
-        directSection.appendChild(buildIssueTable(goalDirectIssues, dash.columns));
-
-        goalCard.appendChild(directSection);
       }
 
       container.appendChild(goalCard);
