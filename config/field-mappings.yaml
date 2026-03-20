@@ -71,7 +71,7 @@ team:
   label: "Team"
 
 estimate:
-  path: "customfield_10016"
+  path: "customfield_10075"
   type: number
   label: "Estimate"
 

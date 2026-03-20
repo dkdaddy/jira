@@ -74,6 +74,7 @@ interface SyncMeta {
   syncType: string;
   lastError: { timestamp: string; message: string; type: string } | null;
   cacheSize: string;
+  fieldMappingsHash?: string;
 }
 
 interface NormalizedIssue {
@@ -416,6 +417,8 @@ async function performSync(
   let jql: string;
   let syncType: string;
 
+  const currentMappingsHash = generateETag(fieldMappings);
+
   const projectsChanged = meta?.projects
     ? JSON.stringify([...meta.projects].sort()) !== JSON.stringify([...projects.projects].sort())
     : false;
@@ -425,7 +428,9 @@ async function performSync(
     ? projects.projects.some((p) => !fs.existsSync(path.resolve(__dirname, meta.snapshotPath, `${p}.json`)))
     : false;
 
-  const needsFullSync = projectsChanged || snapshotMissing;
+  const mappingsChanged = meta?.fieldMappingsHash !== undefined && meta.fieldMappingsHash !== currentMappingsHash;
+
+  const needsFullSync = projectsChanged || snapshotMissing || mappingsChanged;
 
   if (projectsChanged) {
     log('info', 'Project list changed — forcing full sync', {
@@ -435,6 +440,8 @@ async function performSync(
   } else if (snapshotMissing) {
     const missing = projects.projects.filter((p) => !fs.existsSync(path.resolve(__dirname, meta!.snapshotPath, `${p}.json`)));
     log('info', 'Projects missing from snapshot — forcing full sync', { missing });
+  } else if (mappingsChanged) {
+    log('info', 'Field mappings changed — forcing full sync');
   }
 
   if (meta?.lastSync && !needsFullSync) {
@@ -527,6 +534,7 @@ async function performSync(
     syncType,
     lastError: null,
     cacheSize,
+    fieldMappingsHash: currentMappingsHash,
   });
 
   log('info', 'Sync complete', { issues: allIssues.length, duration: syncDuration, snapshot: snapshotName });
@@ -875,8 +883,22 @@ async function main(): Promise<void> {
   const config = loadConfig();
   log('info', 'Configuration loaded', { projects: config.projects.projects });
 
-  // Perform sync
+  // Mutable state — updated on each sync
   let cachedIssues: NormalizedIssue[];
+  let orgRollup: OrgNode[];
+  let initiativeRollup: GoalNode[];
+  let hierarchyRollup: HierarchyNode[];
+  let projectRollup: ReturnType<typeof buildProjectRollup>;
+  let syncInProgress = false;
+
+  function recomputeRollups(): void {
+    orgRollup = buildOrgRollup(cachedIssues, config.org, config.jira.closedStatuses);
+    initiativeRollup = buildInitiativeRollup(cachedIssues, config.initiatives, config.jira.closedStatuses);
+    hierarchyRollup = buildParentChildHierarchy(cachedIssues, config.jira.closedStatuses);
+    projectRollup = buildProjectRollup(cachedIssues, config.jira.closedStatuses);
+  }
+
+  // Initial sync
   try {
     cachedIssues = await performSync(config);
   } catch (err) {
@@ -898,11 +920,7 @@ async function main(): Promise<void> {
     }
   }
 
-  // Pre-compute roll-ups
-  const orgRollup = buildOrgRollup(cachedIssues, config.org, config.jira.closedStatuses);
-  const initiativeRollup = buildInitiativeRollup(cachedIssues, config.initiatives, config.jira.closedStatuses);
-  const hierarchyRollup = buildParentChildHierarchy(cachedIssues, config.jira.closedStatuses);
-  const projectRollup = buildProjectRollup(cachedIssues, config.jira.closedStatuses);
+  recomputeRollups();
 
   // Start Express server
   const app = express();
@@ -960,6 +978,28 @@ async function main(): Promise<void> {
     }
 
     res.json(health);
+  });
+
+  // API: Trigger re-sync from Jira
+  app.post('/api/sync', async (_req: Request, res: Response) => {
+    if (syncInProgress) {
+      res.status(409).json({ error: 'Sync already in progress' });
+      return;
+    }
+    syncInProgress = true;
+    try {
+      log('info', 'Manual sync triggered');
+      cachedIssues = await performSync(config);
+      recomputeRollups();
+      const meta = loadMeta();
+      res.json({ success: true, issueCount: cachedIssues.length, lastSync: meta?.lastSync });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log('error', 'Manual sync failed', { error: msg });
+      res.status(500).json({ error: msg });
+    } finally {
+      syncInProgress = false;
+    }
   });
 
   // API: Org roll-up

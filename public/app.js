@@ -53,7 +53,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // Wire global buttons
-  document.getElementById('btn-refresh')?.addEventListener('click', refreshData);
+  document.getElementById('btn-sync')?.addEventListener('click', syncFromJira);
   document.getElementById('btn-clear')?.addEventListener('click', clearFilters);
   document.getElementById('btn-export-csv')?.addEventListener('click', () => {
     window.location.href = '/api/export/csv';
@@ -106,7 +106,7 @@ function renderSyncIndicator(/** @type {Record<string,unknown>} */ health) {
     if (content) {
       const warn = document.createElement('div');
       warn.className = 'stale-warning';
-      warn.textContent = `Warning: Cache is ${Math.round(ageMin / 60)} hours old. Restart the server to sync fresh data.`;
+      warn.textContent = `Warning: Cache is ${Math.round(ageMin / 60)} hours old. Click "Sync from Jira" to fetch fresh data.`;
       content.parentElement?.insertBefore(warn, content);
     }
   }
@@ -129,6 +129,29 @@ async function refreshData() {
     hideError();
   } catch (err) {
     showError('Refresh failed: ' + (err instanceof Error ? err.message : String(err)));
+  }
+}
+
+async function syncFromJira() {
+  const btn = document.getElementById('btn-sync');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Syncing…';
+  }
+  try {
+    const resp = await fetch('/api/sync', { method: 'POST' });
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}));
+      throw new Error(body.error || `HTTP ${resp.status}`);
+    }
+    await refreshData();
+  } catch (err) {
+    showError('Sync failed: ' + (err instanceof Error ? err.message : String(err)));
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Sync from Jira';
+    }
   }
 }
 
