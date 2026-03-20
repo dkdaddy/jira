@@ -1,0 +1,85 @@
+dashboards:
+  - id: "all-issues"
+    title: "All Issues"
+    view: "flat"
+    baseFilter: ""
+    filterWidgets:
+      - status
+      - priority
+      - team
+      - assignee
+      - quarter
+    columns:
+      - key
+      - summary
+      - type
+      - status
+      - priority
+      - assignee
+      - team
+      - estimate
+      - dueDate
+      - healthStatus
+
+  - id: "ideation"
+    title: "Ideation"
+    view: "flat"
+    baseFilter: "status IN (\"Ideation\", \"Discovery\") AND type IN (\"Story\", \"Epic\")"
+    filterWidgets:
+      - priority
+      - team
+      - quarter
+      - assignee
+    columns:
+      - key
+      - summary
+      - priority
+      - team
+      - quarter
+      - assignee
+      - healthStatus
+
+  - id: "by-team"
+    title: "By Team"
+    view: "org"
+    baseFilter: ""
+    filterWidgets:
+      - status
+      - quarter
+    columns:
+      - team
+      - issueCount
+      - totalEstimate
+      - completionPct
+      - healthCounts
+
+  - id: "by-initiative"
+    title: "By Initiative"
+    view: "initiative"
+    baseFilter: ""
+    filterWidgets:
+      - status
+      - quarter
+    columns:
+      - initiative
+      - issueCount
+      - totalEstimate
+      - progress
+      - atRisk
+
+  - id: "hierarchy"
+    title: "Parent-Child Hierarchy"
+    view: "hierarchy"
+    baseFilter: ""
+    filterWidgets:
+      - status
+      - team
+      - type
+    columns:
+      - key
+      - summary
+      - type
+      - status
+      - totalEstimate
+      - completionPct
+      - healthStatus

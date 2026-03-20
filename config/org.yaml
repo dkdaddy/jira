@@ -1,0 +1,20 @@
+Applications:
+  UI:
+    - red
+    - green
+    - blue
+  Server:
+    - pink
+    - white
+    - black
+  Network Connectivity:
+    - London
+    - New York
+
+Infrastructure:
+  Cloud:
+    - AWS Team
+    - Azure Team
+  Data:
+    - Analytics
+    - Data Warehouse

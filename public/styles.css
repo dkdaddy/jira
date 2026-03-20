@@ -1,0 +1,443 @@
+/* ─── CSS Variables (Theme) ─────────────────────────────────────────────── */
+:root {
+  --color-bg: #f5f6f7;
+  --color-surface: #ffffff;
+  --color-text: #161b22;
+  --color-text-muted: #656d76;
+  --color-border: #d0d7de;
+  --color-primary: #0969da;
+  --color-primary-hover: #0550ae;
+  --color-green: #1a7f37;
+  --color-green-bg: #dafbe1;
+  --color-yellow: #9a6700;
+  --color-yellow-bg: #fff8c5;
+  --color-red: #cf222e;
+  --color-red-bg: #ffebe9;
+  --color-shadow: rgba(0, 0, 0, 0.08);
+  --radius: 6px;
+  --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+}
+
+/* ─── Reset & Base ─────────────────────────────────────────────────────── */
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
+    Ubuntu, Cantarell, sans-serif;
+  background: var(--color-bg);
+  color: var(--color-text);
+  line-height: 1.5;
+}
+
+/* ─── Header ───────────────────────────────────────────────────────────── */
+header {
+  background: var(--color-primary);
+  color: #fff;
+  padding: 1rem 1.5rem;
+  box-shadow: 0 1px 3px var(--color-shadow);
+}
+
+.header-content {
+  max-width: 1400px;
+  margin: 0 auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.header-content h1 {
+  font-size: 1.4rem;
+  font-weight: 600;
+}
+
+.header-meta {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  font-size: 0.85rem;
+}
+
+#sync-indicator {
+  opacity: 0.85;
+}
+
+/* ─── Tab Bar ──────────────────────────────────────────────────────────── */
+nav#tab-bar {
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  gap: 0;
+  overflow-x: auto;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+nav#tab-bar button {
+  background: none;
+  border: none;
+  padding: 0.75rem 1.25rem;
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+nav#tab-bar button:hover {
+  color: var(--color-text);
+}
+
+nav#tab-bar button.active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+  font-weight: 600;
+}
+
+/* ─── Container ────────────────────────────────────────────────────────── */
+.container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 1.25rem 1.5rem;
+}
+
+/* ─── Error Banner ─────────────────────────────────────────────────────── */
+.error-banner {
+  background: var(--color-red-bg);
+  color: var(--color-red);
+  border: 1px solid var(--color-red);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+
+.error-banner.hidden {
+  display: none;
+}
+
+/* ─── Toolbar ──────────────────────────────────────────────────────────── */
+.toolbar {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.toolbar input[type="text"] {
+  flex: 1;
+  min-width: 200px;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font-size: 0.875rem;
+}
+
+.toolbar input[type="text"]:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(9, 105, 218, 0.15);
+}
+
+/* ─── Buttons ──────────────────────────────────────────────────────────── */
+button {
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+button:hover {
+  background: var(--color-bg);
+}
+
+header button {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #fff;
+}
+
+header button:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* ─── Filter Bar ───────────────────────────────────────────────────────── */
+.filter-bar {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.filter-widget {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 140px;
+}
+
+.filter-widget label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.filter-widget select,
+.filter-widget input {
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  background: var(--color-surface);
+}
+
+.filter-widget select:focus,
+.filter-widget input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(9, 105, 218, 0.15);
+}
+
+/* ─── Data Table ───────────────────────────────────────────────────────── */
+.data-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+table.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+table.data-table th {
+  position: sticky;
+  top: 0;
+  background: var(--color-bg);
+  text-align: left;
+  padding: 0.6rem 0.75rem;
+  font-weight: 600;
+  border-bottom: 2px solid var(--color-border);
+  white-space: nowrap;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.03em;
+}
+
+table.data-table td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: top;
+}
+
+table.data-table tr:last-child td {
+  border-bottom: none;
+}
+
+table.data-table tr:hover {
+  background: rgba(9, 105, 218, 0.04);
+}
+
+/* Health status row tints */
+table.data-table tr.health-red {
+  background: var(--color-red-bg);
+}
+
+table.data-table tr.health-red:hover {
+  background: #ffd7d5;
+}
+
+table.data-table tr.health-yellow {
+  background: var(--color-yellow-bg);
+}
+
+table.data-table tr.health-yellow:hover {
+  background: #fff3b0;
+}
+
+/* ─── Health Badge ─────────────────────────────────────────────────────── */
+.health-badge {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 0.3rem;
+  vertical-align: middle;
+}
+
+.health-badge.green { background: var(--color-green); }
+.health-badge.yellow { background: var(--color-yellow); }
+.health-badge.red { background: var(--color-red); }
+
+/* ─── Rollup Cards ─────────────────────────────────────────────────────── */
+.rollup-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.rollup-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 1rem;
+}
+
+.rollup-card h2 {
+  font-size: 1.1rem;
+  margin-bottom: 0.75rem;
+  color: var(--color-primary);
+}
+
+.rollup-card h3 {
+  font-size: 0.95rem;
+  margin: 0.75rem 0 0.5rem;
+  color: var(--color-text);
+}
+
+.rollup-metrics {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.metric-value {
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+
+.metric-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  letter-spacing: 0.03em;
+}
+
+/* ─── Hierarchy Tree ───────────────────────────────────────────────────── */
+.hierarchy-tree {
+  font-size: 0.85rem;
+}
+
+.hierarchy-node {
+  border-left: 2px solid var(--color-border);
+  margin-left: 1rem;
+  padding-left: 0.75rem;
+}
+
+.hierarchy-node.root {
+  border-left: none;
+  margin-left: 0;
+  padding-left: 0;
+}
+
+.hierarchy-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0;
+  cursor: pointer;
+}
+
+.hierarchy-row:hover {
+  background: rgba(9, 105, 218, 0.04);
+  border-radius: var(--radius);
+}
+
+.hierarchy-toggle {
+  width: 1.2rem;
+  text-align: center;
+  color: var(--color-text-muted);
+  user-select: none;
+  font-size: 0.75rem;
+}
+
+.hierarchy-key {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--color-primary);
+}
+
+.hierarchy-summary {
+  flex: 1;
+}
+
+.hierarchy-type {
+  font-size: 0.75rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+}
+
+.hierarchy-metrics {
+  display: flex;
+  gap: 0.75rem;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.hierarchy-children {
+  display: block;
+}
+
+.hierarchy-children.collapsed {
+  display: none;
+}
+
+/* ─── Progress Bar ─────────────────────────────────────────────────────── */
+.progress-bar {
+  width: 80px;
+  height: 6px;
+  background: var(--color-border);
+  border-radius: 3px;
+  overflow: hidden;
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 0.4rem;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: var(--color-green);
+  border-radius: 3px;
+  transition: width 0.3s;
+}
+
+/* ─── Empty State ──────────────────────────────────────────────────────── */
+.empty-state {
+  text-align: center;
+  padding: 3rem 1rem;
+  color: var(--color-text-muted);
+  font-size: 0.95rem;
+}
+
+/* ─── Stale Data Warning ──────────────────────────────────────────────── */
+.stale-warning {
+  background: var(--color-yellow-bg);
+  color: var(--color-yellow);
+  border: 1px solid var(--color-yellow);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+}
