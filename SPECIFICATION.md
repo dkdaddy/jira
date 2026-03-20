@@ -1,4 +1,4 @@
-This is the comprehensive **Technical Requirements Document (TRD)** for your Jira Custom Dashboard. You can save this as `SPECIFICATION.md` in your root directory. It is designed to provide an LLM agent with all the architectural constraints, data schemas, and feature logic required to build the system from scratch.
+This is the comprehensive **Technical Requirements Document (TRD)** for the Jira Custom Dashboard. It is designed to provide an LLM agent with all the architectural constraints, data schemas, and feature logic required to build the system from scratch.
 
 ---
 
@@ -12,6 +12,7 @@ A high-performance, **offline-first** Jira reporting tool that runs as a Node.js
 * **Module System:** Pure ES Modules (ESM) for both Server and Client.
 * **No Heavy Frameworks:** No React, Vue, or Angular. Use Vanilla JS for the UI.
 * **Styling:** Pure CSS with CSS Variables for themes.
+* **File Separation:** HTML, CSS, and JavaScript must be in separate files. `public/index.html` must contain only markup — no `<style>` blocks and no inline `<script>` blocks. All styles go in `public/styles.css`; all JavaScript goes in `public/app.js`.
 * **Database:** None. The Filesystem (`/cache/*.json`) is the source of truth.
 * **Cache Format:** Timestamped JSON files (`cache/YYYY-MM-DD_HH-mm-ss/{project_key}.json`)
 * **Field Retrieval:** Fetch ALL available fields from Jira (standard + custom)
@@ -209,8 +210,9 @@ cache/
 The system uses `field-mappings.yaml` to abstract Jira's field complexity:
 
 **Process Flow:**
-1.  **Load Field Definitions:** Parse `field-definitions.json` to understand all available fields.
-2.  **Apply Mappings:** Transform raw Jira issues using `field-mappings.yaml`:
+1.  **Load Field Mappings:** Read `config/field-mappings.yaml` to get the logical name → Jira field path table (e.g., `team: "customfield_10001.value"`, `assignee: "assignee.displayName"`).
+2.  **Validate Mappings (optional):** Cross-reference the mapped field IDs against `cache/field-definitions.json`; log a warning for any mapped field that does not exist in the Jira instance.
+3.  **Apply Mappings:** For each raw Jira issue, resolve every entry in the mapping table by walking the dot-notation path into `issue.fields` and writing the result under the logical name:
     ```javascript
     // Raw Jira issue
     {
@@ -254,8 +256,8 @@ The system uses `field-mappings.yaml` to abstract Jira's field complexity:
       "startDate": "2026-03-01"
     }
     ```
-3.  **Handle Missing Fields:** If a configured field doesn't exist in Jira, log a warning and use `null` or configured default.
-4.  **Type Coercion:** Apply appropriate type conversions:
+4.  **Handle Missing Fields:** If a configured field doesn't exist in Jira, log a warning and use `null` or configured default.
+5.  **Type Coercion:** Apply appropriate type conversions:
     - **Dates:** ISO 8601 strings → Date objects
     - **Numbers:** Parse story points, numeric custom fields
     - **Arrays:** Multi-select fields
@@ -846,8 +848,9 @@ jira-dashboard/
 │   ├── latest -> ...          # Symlink to latest snapshot
 │   └── YYYY-MM-DD_HH-mm-ss/  # Timestamped snapshots
 ├── public/
-│   ├── index.html             # UI
-│   └── app.js                 # Frontend logic
+│   ├── index.html             # Markup only — no inline styles or scripts
+│   ├── styles.css             # All CSS (linked via <link> in index.html)
+│   └── app.js                 # All JavaScript (linked via <script src> in index.html)
 ├── server.ts                  # Main server
 └── package.json
 ```
