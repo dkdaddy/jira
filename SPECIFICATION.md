@@ -58,7 +58,7 @@ A high-performance, **offline-first** Jira reporting tool that runs as a Node.js
 * **Styling:** Pure CSS with CSS Variables for themes.
 * **File Separation:** HTML, CSS, and JavaScript must be in separate files. `public/index.html` must contain only markup — no `<style>` blocks and no inline `<script>` blocks. All styles go in `public/styles.css`; all JavaScript goes in `public/app.js`.
 * **Database:** None. The Filesystem (`/cache/*.json`) is the source of truth.
-* **Cache Format:** Timestamped JSON files (`cache/YYYY-MM-DD_HH-mm-ss/{project_key}.json`)
+* **Cache Format:** Timestamped JSON files (`cache/YYYY-MM-DD_HH-mm-ss/{project_key}.json`) storing raw Jira API responses (pre-normalization). Field mapping is applied at server startup, not at cache time, so changing `field-mappings.yaml` does not invalidate the cache.
 * **Field Retrieval:** Fetch ALL available fields from Jira (standard + custom)
 * **Configuration Format:** YAML for all configuration files (human-readable, supports comments)
 * **Secrets Management:** All credentials stored in `config/jira.yaml` (gitignored); never commit `config/jira.yaml` to version control
@@ -111,8 +111,9 @@ Upon execution, the server must:
     * Continue fetching until `startAt + maxResults >= total`.
 7.  **File Persistence:** 
     * Create timestamped directory: `cache/YYYY-MM-DD_HH-mm-ss/`
-    * Save each project as: `cache/YYYY-MM-DD_HH-mm-ss/{project_key}.json`
+    * Save each project's **raw Jira API response** (the original `{ key, fields }` structure) as: `cache/YYYY-MM-DD_HH-mm-ss/{project_key}.json`
     * Update `cache/meta.json` with current timestamp and snapshot location.
+    * **Important:** Cache files store un-normalized data. Field mapping and normalization are applied on load, not at write time. This means changes to `config/field-mappings.yaml` take effect on the next server restart without requiring a re-sync from Jira.
 8.  **Rate Limiting:** Implement exponential backoff (starting at 100ms) between API bursts to avoid Atlassian 429 errors.
 9.  **Error Recovery:** On sync failure, preserve previous snapshot and log error details for manual intervention.
 
@@ -291,7 +292,7 @@ The system uses `field-mappings.yaml` to abstract Jira's field complexity:
       label: "Team"
     ```
 2.  **Validate Mappings (optional):** Cross-reference the mapped field IDs against `cache/field-definitions.json`; log a warning for any mapped field that does not exist in the Jira instance.
-3.  **Apply Mappings:** For each raw Jira issue, resolve every entry in the mapping table by walking the dot-notation path into `issue.fields` and writing the result under the logical name:
+3.  **Apply Mappings (at server startup, not at cache time):** For each raw Jira issue loaded from the cache, resolve every entry in the mapping table by walking the dot-notation path into `issue.fields` and writing the result under the logical name:
     ```javascript
     // Raw Jira issue
     {
@@ -351,7 +352,7 @@ The system uses `field-mappings.yaml` to abstract Jira's field complexity:
 - Configuration-driven: no code changes needed for new fields.
 
 ### 4.1 Computed Fields (Server-Side)
-After field mapping, the server computes `healthStatus` for every issue before writing normalized data to disk. The `healthStatus` property is included in every normalized issue returned by `/api/data`.
+After loading raw issues from the cache, the server applies field mapping and then computes `healthStatus` for every issue in memory. The `healthStatus` property is included in every normalized issue returned by `/api/data`. Since normalization happens at startup (not at cache time), updating `field-mappings.yaml` and restarting the server will re-transform all cached data without a Jira re-sync.
 
 * **`healthStatus`**: A string (`red`, `yellow`, `green`) determined by the following rules, evaluated in priority order:
 

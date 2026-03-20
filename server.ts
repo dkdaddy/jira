@@ -74,7 +74,6 @@ interface SyncMeta {
   syncType: string;
   lastError: { timestamp: string; message: string; type: string } | null;
   cacheSize: string;
-  fieldMappingsHash?: string;
 }
 
 interface NormalizedIssue {
@@ -351,16 +350,13 @@ function saveMeta(meta: SyncMeta): void {
   fs.writeFileSync(META_PATH, JSON.stringify(meta, null, 2), 'utf8');
 }
 
-function loadSnapshot(snapshotPath: string, projects: string[]): NormalizedIssue[] {
-  const issues: NormalizedIssue[] = [];
+function loadSnapshot(snapshotPath: string, projects: string[]): JiraRawIssue[] {
+  const issues: JiraRawIssue[] = [];
   for (const proj of projects) {
     const filePath = path.join(snapshotPath, `${proj}.json`);
     if (fs.existsSync(filePath)) {
       try {
-        const data = JSON.parse(fs.readFileSync(filePath, 'utf8')) as NormalizedIssue[];
-        for (const issue of data) {
-          if (!issue.project) issue.project = issue.key.split('-')[0];
-        }
+        const data = JSON.parse(fs.readFileSync(filePath, 'utf8')) as JiraRawIssue[];
         issues.push(...data);
       } catch {
         log('warn', `Corrupt snapshot file ${filePath}`);
@@ -368,6 +364,10 @@ function loadSnapshot(snapshotPath: string, projects: string[]): NormalizedIssue
     }
   }
   return issues;
+}
+
+function transformRawIssues(rawIssues: JiraRawIssue[], mappings: FieldMappings, closedStatuses: string[]): NormalizedIssue[] {
+  return rawIssues.map((raw) => normalizeIssue(raw, mappings, closedStatuses));
 }
 
 function calculateDirSize(dir: string): number {
@@ -394,8 +394,8 @@ function formatBytes(bytes: number): string {
 
 async function performSync(
   config: ReturnType<typeof loadConfig>,
-): Promise<NormalizedIssue[]> {
-  const { jira, projects, fieldMappings } = config;
+): Promise<JiraRawIssue[]> {
+  const { jira, projects } = config;
   const client = createJiraClient(jira);
   const meta = loadMeta();
   const syncStart = Date.now();
@@ -417,8 +417,6 @@ async function performSync(
   let jql: string;
   let syncType: string;
 
-  const currentMappingsHash = generateETag(fieldMappings);
-
   const projectsChanged = meta?.projects
     ? JSON.stringify([...meta.projects].sort()) !== JSON.stringify([...projects.projects].sort())
     : false;
@@ -428,9 +426,7 @@ async function performSync(
     ? projects.projects.some((p) => !fs.existsSync(path.resolve(__dirname, meta.snapshotPath, `${p}.json`)))
     : false;
 
-  const mappingsChanged = meta?.fieldMappingsHash !== undefined && meta.fieldMappingsHash !== currentMappingsHash;
-
-  const needsFullSync = projectsChanged || snapshotMissing || mappingsChanged;
+  const needsFullSync = projectsChanged || snapshotMissing;
 
   if (projectsChanged) {
     log('info', 'Project list changed — forcing full sync', {
@@ -440,8 +436,6 @@ async function performSync(
   } else if (snapshotMissing) {
     const missing = projects.projects.filter((p) => !fs.existsSync(path.resolve(__dirname, meta!.snapshotPath, `${p}.json`)));
     log('info', 'Projects missing from snapshot — forcing full sync', { missing });
-  } else if (mappingsChanged) {
-    log('info', 'Field mappings changed — forcing full sync');
   }
 
   if (meta?.lastSync && !needsFullSync) {
@@ -488,31 +482,28 @@ async function performSync(
     await sleep(100);
   }
 
-  // Normalize
-  const freshIssues = rawIssues.map((raw) => normalizeIssue(raw, fieldMappings, jira.closedStatuses));
-
   // Merge with previous snapshot for incremental syncs
-  let allIssues: NormalizedIssue[];
+  let allRawIssues: JiraRawIssue[];
   if (syncType === 'incremental' && meta) {
     const previousPath = path.resolve(__dirname, meta.snapshotPath);
     const previousIssues = loadSnapshot(previousPath, projects.projects);
-    const issueMap = new Map<string, NormalizedIssue>();
+    const issueMap = new Map<string, JiraRawIssue>();
     for (const issue of previousIssues) issueMap.set(issue.key, issue);
-    for (const issue of freshIssues) issueMap.set(issue.key, issue);
-    allIssues = Array.from(issueMap.values());
-    log('info', 'Merged incremental sync', { previous: previousIssues.length, fresh: freshIssues.length, total: allIssues.length });
+    for (const issue of rawIssues) issueMap.set(issue.key, issue);
+    allRawIssues = Array.from(issueMap.values());
+    log('info', 'Merged incremental sync', { previous: previousIssues.length, fresh: rawIssues.length, total: allRawIssues.length });
   } else {
-    allIssues = freshIssues;
+    allRawIssues = rawIssues;
   }
 
-  // Save snapshot
+  // Save snapshot (raw Jira data — transformation happens on load)
   const snapshotName = formatTimestamp(new Date());
   const snapshotDir = path.join(CACHE_DIR, snapshotName);
   fs.mkdirSync(snapshotDir, { recursive: true });
 
   // Group by project and save
-  const byProject = new Map<string, NormalizedIssue[]>();
-  for (const issue of allIssues) {
+  const byProject = new Map<string, JiraRawIssue[]>();
+  for (const issue of allRawIssues) {
     const proj = issue.key.split('-')[0];
     if (!byProject.has(proj)) byProject.set(proj, []);
     byProject.get(proj)!.push(issue);
@@ -529,16 +520,15 @@ async function performSync(
     latestSnapshot: snapshotName,
     snapshotPath: `cache/${snapshotName}`,
     projects: projects.projects,
-    issueCount: allIssues.length,
+    issueCount: allRawIssues.length,
     syncDuration,
     syncType,
     lastError: null,
     cacheSize,
-    fieldMappingsHash: currentMappingsHash,
   });
 
-  log('info', 'Sync complete', { issues: allIssues.length, duration: syncDuration, snapshot: snapshotName });
-  return allIssues;
+  log('info', 'Sync complete', { issues: allRawIssues.length, duration: syncDuration, snapshot: snapshotName });
+  return allRawIssues;
 }
 
 // ─── Roll-up: Org Hierarchy ──────────────────────────────────────────────────
@@ -884,6 +874,7 @@ async function main(): Promise<void> {
   log('info', 'Configuration loaded', { projects: config.projects.projects });
 
   // Mutable state — updated on each sync
+  let cachedRawIssues: JiraRawIssue[];
   let cachedIssues: NormalizedIssue[];
   let orgRollup: OrgNode[];
   let initiativeRollup: GoalNode[];
@@ -891,7 +882,8 @@ async function main(): Promise<void> {
   let projectRollup: ReturnType<typeof buildProjectRollup>;
   let syncInProgress = false;
 
-  function recomputeRollups(): void {
+  function recomputeFromRaw(): void {
+    cachedIssues = transformRawIssues(cachedRawIssues, config.fieldMappings, config.jira.closedStatuses);
     orgRollup = buildOrgRollup(cachedIssues, config.org, config.jira.closedStatuses);
     initiativeRollup = buildInitiativeRollup(cachedIssues, config.initiatives, config.jira.closedStatuses);
     hierarchyRollup = buildParentChildHierarchy(cachedIssues, config.jira.closedStatuses);
@@ -900,7 +892,7 @@ async function main(): Promise<void> {
 
   // Initial sync
   try {
-    cachedIssues = await performSync(config);
+    cachedRawIssues = await performSync(config);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     log('error', 'Sync failed', { error: msg });
@@ -909,7 +901,7 @@ async function main(): Promise<void> {
     const meta = loadMeta();
     if (meta) {
       log('info', 'Falling back to previous snapshot', { snapshot: meta.latestSnapshot });
-      cachedIssues = loadSnapshot(path.resolve(__dirname, meta.snapshotPath), config.projects.projects);
+      cachedRawIssues = loadSnapshot(path.resolve(__dirname, meta.snapshotPath), config.projects.projects);
       saveMeta({
         ...meta,
         lastError: { timestamp: new Date().toISOString(), message: msg, type: 'SyncError' },
@@ -920,7 +912,7 @@ async function main(): Promise<void> {
     }
   }
 
-  recomputeRollups();
+  recomputeFromRaw();
 
   // Start Express server
   const app = express();
@@ -989,8 +981,8 @@ async function main(): Promise<void> {
     syncInProgress = true;
     try {
       log('info', 'Manual sync triggered');
-      cachedIssues = await performSync(config);
-      recomputeRollups();
+      cachedRawIssues = await performSync(config);
+      recomputeFromRaw();
       const meta = loadMeta();
       res.json({ success: true, issueCount: cachedIssues.length, lastSync: meta?.lastSync });
     } catch (err) {
