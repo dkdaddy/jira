@@ -1,0 +1,111 @@
+# Standard fields
+key:
+  path: "key"
+  type: text
+  label: "Key"
+
+summary:
+  path: "summary"
+  type: text
+  label: "Summary"
+
+description:
+  path: "description"
+  type: text
+  label: "Description"
+
+type:
+  path: "issuetype.name"
+  type: dropdown
+  label: "Type"
+
+status:
+  path: "status.name"
+  type: dropdown
+  label: "Status"
+
+priority:
+  path: "priority.name"
+  type: dropdown
+  label: "Priority"
+
+assignee:
+  path: "assignee.displayName"
+  type: dropdown
+  label: "Assignee"
+
+parent:
+  path: "parent.key"
+  type: text
+  label: "Parent"
+
+created:
+  path: "created"
+  type: date
+  label: "Created"
+
+updated:
+  path: "updated"
+  type: date
+  label: "Updated"
+
+dueDate:
+  path: "duedate"
+  type: date
+  label: "Due Date"
+
+healthStatus:
+  path: "_computed"
+  type: dropdown
+  label: "Health"
+
+# Custom fields — adjust IDs for your Jira instance
+team:
+  path: "customfield_10001.value"
+  type: dropdown
+  label: "Team"
+
+estimate:
+  path: "customfield_10016"
+  type: number
+  label: "Estimate"
+
+tShirtSize:
+  path: "customfield_10020"
+  type: dropdown
+  label: "T-Shirt Size"
+
+epicName:
+  path: "customfield_10014"
+  type: text
+  label: "Epic"
+
+quarter:
+  path: "customfield_10025"
+  type: dropdown
+  label: "Quarter"
+
+engLead:
+  path: "customfield_10030.displayName"
+  type: dropdown
+  label: "Eng Lead"
+
+initiative:
+  path: "customfield_10050"
+  type: dropdown
+  label: "Initiative"
+
+startDate:
+  path: "customfield_10015"
+  type: date
+  label: "Start Date"
+
+betaDate:
+  path: "customfield_10040"
+  type: date
+  label: "Beta Date"
+
+labels:
+  path: "labels"
+  type: multiselect
+  label: "Labels"
