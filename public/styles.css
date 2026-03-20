@@ -65,6 +65,25 @@ header {
   opacity: 0.85;
 }
 
+.header-stats {
+  max-width: 1400px;
+  margin: 0.6rem auto 0;
+  display: flex;
+  gap: 1.5rem;
+  font-size: 0.8rem;
+  opacity: 0.9;
+}
+
+.header-stats .stat {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.header-stats .stat-value {
+  font-weight: 700;
+}
+
 /* ─── Tab Bar ──────────────────────────────────────────────────────────── */
 nav#tab-bar {
   background: var(--color-surface);
@@ -252,22 +271,7 @@ table.data-table tr:hover {
   background: rgba(9, 105, 218, 0.04);
 }
 
-/* Health status row tints */
-table.data-table tr.health-red {
-  background: var(--color-red-bg);
-}
-
-table.data-table tr.health-red:hover {
-  background: #ffd7d5;
-}
-
-table.data-table tr.health-yellow {
-  background: var(--color-yellow-bg);
-}
-
-table.data-table tr.health-yellow:hover {
-  background: #fff3b0;
-}
+/* Health status row tints — removed */
 
 /* ─── Health Badge ─────────────────────────────────────────────────────── */
 .health-badge {

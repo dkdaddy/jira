@@ -66,7 +66,7 @@ healthStatus:
 
 # Custom fields — adjust IDs for your Jira instance
 team:
-  path: "customfield_10001.value"
+  path: "customfield_10001.name"
   type: dropdown
   label: "Team"
 
@@ -86,7 +86,7 @@ epicName:
   label: "Epic"
 
 quarter:
-  path: "customfield_10025"
+  path: "customfield_10142.value"
   type: dropdown
   label: "Quarter"
 

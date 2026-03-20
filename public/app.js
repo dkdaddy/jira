@@ -43,6 +43,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     allIssues = /** @type {typeof allIssues} */ (issues);
 
     renderSyncIndicator(/** @type {Record<string,unknown>} */ (health));
+    renderHeaderStats();
     renderTabs();
 
     if (appConfig.dashboards.length > 0) {
@@ -76,6 +77,45 @@ function showError(/** @type {string} */ msg) {
 function hideError() {
   const el = document.getElementById('error-banner');
   if (el) el.classList.add('hidden');
+}
+
+// ─── Header Stats ─────────────────────────────────────────────────────────────
+
+function renderHeaderStats() {
+  const el = document.getElementById('header-stats');
+  if (!el || !appConfig) return;
+
+  const issueCount = allIssues.length;
+
+  const projects = new Set(allIssues.map((i) => String(i.key ?? '').split('-')[0]).filter(Boolean));
+
+  const teams = new Set(allIssues.map((i) => i.team).filter(Boolean));
+
+  const initiatives = new Set(allIssues.map((i) => i.initiative).filter(Boolean));
+
+  let redCount = 0;
+  let yellowCount = 0;
+  for (const issue of allIssues) {
+    if (issue.healthStatus === 'red') redCount++;
+    else if (issue.healthStatus === 'yellow') yellowCount++;
+  }
+
+  const stats = [
+    { label: 'Issues', value: issueCount },
+    { label: 'Projects', value: projects.size },
+    { label: 'Teams', value: teams.size },
+    { label: 'Initiatives', value: initiatives.size },
+    { label: 'At Risk', value: redCount },
+    { label: 'Needs Attention', value: yellowCount },
+  ];
+
+  el.innerHTML = '';
+  for (const s of stats) {
+    const span = document.createElement('span');
+    span.className = 'stat';
+    span.innerHTML = `<span class="stat-value">${s.value}</span> ${s.label}`;
+    el.appendChild(span);
+  }
 }
 
 // ─── Sync Indicator ───────────────────────────────────────────────────────────
@@ -125,6 +165,7 @@ async function refreshData() {
     ]);
     allIssues = issues;
     renderSyncIndicator(/** @type {Record<string,unknown>} */ (health));
+    renderHeaderStats();
     renderCurrentTab();
     hideError();
   } catch (err) {
@@ -585,8 +626,6 @@ function renderFlatTable(/** @type {HTMLElement} */ container, /** @type {Dashbo
   for (const issue of issues) {
     const tr = document.createElement('tr');
     const health = issue.healthStatus;
-    if (health === 'red') tr.className = 'health-red';
-    else if (health === 'yellow') tr.className = 'health-yellow';
 
     for (const col of dash.columns) {
       const td = document.createElement('td');
@@ -595,7 +634,8 @@ function renderFlatTable(/** @type {HTMLElement} */ container, /** @type {Dashbo
         const badge = document.createElement('span');
         badge.className = `health-badge ${health}`;
         td.appendChild(badge);
-        td.append(String(health ?? ''));
+        const reason = issue.healthReason;
+        td.append(String(reason ?? ''));
       } else {
         const val = issue[col];
         td.textContent = formatCellValue(val);

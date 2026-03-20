@@ -80,6 +80,7 @@ interface NormalizedIssue {
   [field: string]: unknown;
   key: string;
   healthStatus: string;
+  healthReason: string;
 }
 
 interface JiraSearchResponse {
@@ -288,7 +289,7 @@ function resolveFieldPath(obj: unknown, dotPath: string): unknown {
 }
 
 function normalizeIssue(raw: JiraRawIssue, mappings: FieldMappings, closedStatuses: string[]): NormalizedIssue {
-  const result: NormalizedIssue = { key: raw.key, healthStatus: 'green' };
+  const result: NormalizedIssue = { key: raw.key, healthStatus: 'green', healthReason: '' };
 
   for (const [logicalName, mapping] of Object.entries(mappings)) {
     if (logicalName === 'healthStatus') continue; // computed later
@@ -302,26 +303,28 @@ function normalizeIssue(raw: JiraRawIssue, mappings: FieldMappings, closedStatus
   }
 
   result.project = raw.key.split('-')[0];
-  result.healthStatus = computeHealthStatus(result, closedStatuses);
+  const health = computeHealthStatus(result, closedStatuses);
+  result.healthStatus = health.color;
+  result.healthReason = health.reason;
   return result;
 }
 
-function computeHealthStatus(issue: NormalizedIssue, closedStatuses: string[]): string {
+function computeHealthStatus(issue: NormalizedIssue, closedStatuses: string[]): { color: string; reason: string } {
   const status = issue.status as string | null;
-  if (status && closedStatuses.includes(status)) return 'green';
-  if (status === 'Blocked') return 'red';
+  if (status && closedStatuses.includes(status)) return { color: 'green', reason: '' };
+  if (status === 'Blocked') return { color: 'red', reason: 'Blocked' };
 
   const dueDateVal = issue.dueDate as string | null;
   if (dueDateVal) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const due = new Date(dueDateVal);
-    if (due < today) return 'red';
-    if (due.getTime() - today.getTime() < 7 * 24 * 60 * 60 * 1000) return 'yellow';
+    if (due < today) return { color: 'red', reason: 'Overdue' };
+    if (due.getTime() - today.getTime() < 7 * 24 * 60 * 60 * 1000) return { color: 'yellow', reason: 'Due soon' };
   }
 
-  if (!issue.assignee) return 'yellow';
-  return 'green';
+  if (!issue.assignee) return { color: 'yellow', reason: 'Unassigned' };
+  return { color: 'green', reason: '' };
 }
 
 // ─── Cache Management ─────────────────────────────────────────────────────────

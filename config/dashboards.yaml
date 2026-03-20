@@ -19,6 +19,8 @@ dashboards:
       - assignee
       - team
       - estimate
+      - quarter
+      - startDate
       - dueDate
       - healthStatus
 
@@ -38,6 +40,7 @@ dashboards:
       - priority
       - team
       - quarter
+      - startDate
       - assignee
       - healthStatus
 
@@ -80,6 +83,7 @@ dashboards:
       - status
       - team
       - type
+      - quarter
     columns:
       - key
       - summary
@@ -87,6 +91,8 @@ dashboards:
       - status
       - totalEstimate
       - completionPct
+      - quarter
+      - startDate
       - healthStatus
 
   - id: "by-project"
