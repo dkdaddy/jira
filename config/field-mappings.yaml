@@ -1,4 +1,9 @@
 # Standard fields
+project:
+  path: "_computed"
+  type: dropdown
+  label: "Project"
+
 key:
   path: "key"
   type: text

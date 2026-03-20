@@ -31,7 +31,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     const [config, fields, issues, health] = await Promise.all([
       fetchJSON('/api/config'),
       fetchJSON('/api/fields'),
-      fetchJSON('/api/data'),
+      fetch('/api/data', { cache: 'no-cache' }).then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      }),
       fetchJSON('/api/health'),
     ]);
 
@@ -515,6 +518,9 @@ function renderCurrentTab() {
     case 'initiative':
       renderInitiativeView(content);
       break;
+    case 'project':
+      renderProjectView(content);
+      break;
     case 'hierarchy':
       renderHierarchyView(content);
       break;
@@ -740,6 +746,52 @@ async function renderInitiativeView(/** @type {HTMLElement} */ container) {
     container.appendChild(grid);
   } catch (err) {
     showError('Failed to load initiative data: ' + (err instanceof Error ? err.message : String(err)));
+  }
+}
+
+// ─── Hierarchy View ───────────────────────────────────────────────────────────
+
+// ─── Project Roll-up View ─────────────────────────────────────────────────────
+
+async function renderProjectView(/** @type {HTMLElement} */ container) {
+  try {
+    const data = await fetchJSON('/api/rollup/project');
+    const projects = /** @type {Array<Record<string,unknown>>} */ (data);
+
+    if (projects.length === 0) {
+      container.innerHTML = '<div class="empty-state">No project data available.</div>';
+      return;
+    }
+
+    const grid = document.createElement('div');
+    grid.className = 'rollup-grid';
+
+    for (const proj of projects) {
+      const card = document.createElement('div');
+      card.className = 'rollup-card';
+
+      const h2 = document.createElement('h2');
+      h2.textContent = /** @type {string} */ (proj.project);
+      card.appendChild(h2);
+
+      const metrics = /** @type {Record<string,unknown>} */ (proj.metrics);
+      card.appendChild(renderMetrics(metrics));
+
+      const healthCounts = /** @type {Record<string,number>} */ (metrics.healthCounts);
+      const healthDiv = document.createElement('div');
+      healthDiv.className = 'health-summary';
+      healthDiv.innerHTML =
+        `<span class="health-badge green"></span>${healthCounts.green} ` +
+        `<span class="health-badge yellow"></span>${healthCounts.yellow} ` +
+        `<span class="health-badge red"></span>${healthCounts.red}`;
+      card.appendChild(healthDiv);
+
+      grid.appendChild(card);
+    }
+
+    container.appendChild(grid);
+  } catch (err) {
+    showError('Failed to load project data: ' + (err instanceof Error ? err.message : String(err)));
   }
 }
 

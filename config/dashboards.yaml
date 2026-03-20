@@ -4,6 +4,7 @@ dashboards:
     view: "flat"
     baseFilter: ""
     filterWidgets:
+      - project
       - status
       - priority
       - team
@@ -26,6 +27,7 @@ dashboards:
     view: "flat"
     baseFilter: "status IN (\"Ideation\", \"Discovery\") AND type IN (\"Story\", \"Epic\")"
     filterWidgets:
+      - project
       - priority
       - team
       - quarter
@@ -44,6 +46,7 @@ dashboards:
     view: "org"
     baseFilter: ""
     filterWidgets:
+      - project
       - status
       - quarter
     columns:
@@ -58,6 +61,7 @@ dashboards:
     view: "initiative"
     baseFilter: ""
     filterWidgets:
+      - project
       - status
       - quarter
     columns:
@@ -72,6 +76,7 @@ dashboards:
     view: "hierarchy"
     baseFilter: ""
     filterWidgets:
+      - project
       - status
       - team
       - type
@@ -83,3 +88,17 @@ dashboards:
       - totalEstimate
       - completionPct
       - healthStatus
+
+  - id: "by-project"
+    title: "By Project"
+    view: "project"
+    baseFilter: ""
+    filterWidgets:
+      - status
+      - quarter
+    columns:
+      - project
+      - issueCount
+      - totalEstimate
+      - completionPct
+      - healthCounts

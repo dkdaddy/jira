@@ -301,6 +301,7 @@ function normalizeIssue(raw: JiraRawIssue, mappings: FieldMappings, closedStatus
     }
   }
 
+  result.project = raw.key.split('-')[0];
   result.healthStatus = computeHealthStatus(result, closedStatuses);
   return result;
 }
@@ -356,6 +357,9 @@ function loadSnapshot(snapshotPath: string, projects: string[]): NormalizedIssue
     if (fs.existsSync(filePath)) {
       try {
         const data = JSON.parse(fs.readFileSync(filePath, 'utf8')) as NormalizedIssue[];
+        for (const issue of data) {
+          if (!issue.project) issue.project = issue.key.split('-')[0];
+        }
         issues.push(...data);
       } catch {
         log('warn', `Corrupt snapshot file ${filePath}`);
@@ -412,7 +416,28 @@ async function performSync(
   let jql: string;
   let syncType: string;
 
-  if (meta?.lastSync) {
+  const projectsChanged = meta?.projects
+    ? JSON.stringify([...meta.projects].sort()) !== JSON.stringify([...projects.projects].sort())
+    : false;
+
+  // Also check if any project is missing from the latest snapshot
+  const snapshotMissing = meta?.snapshotPath
+    ? projects.projects.some((p) => !fs.existsSync(path.resolve(__dirname, meta.snapshotPath, `${p}.json`)))
+    : false;
+
+  const needsFullSync = projectsChanged || snapshotMissing;
+
+  if (projectsChanged) {
+    log('info', 'Project list changed — forcing full sync', {
+      previous: meta!.projects,
+      current: projects.projects,
+    });
+  } else if (snapshotMissing) {
+    const missing = projects.projects.filter((p) => !fs.existsSync(path.resolve(__dirname, meta!.snapshotPath, `${p}.json`)));
+    log('info', 'Projects missing from snapshot — forcing full sync', { missing });
+  }
+
+  if (meta?.lastSync && !needsFullSync) {
     const lastSyncDuration = meta.syncDuration || 60;
     const bufferSeconds = Math.max(60, lastSyncDuration * 2);
     const safeLastSync = new Date(new Date(meta.lastSync).getTime() - bufferSeconds * 1000);
@@ -685,6 +710,53 @@ function buildInitiativeRollup(issues: NormalizedIssue[], initiativesConfig: Ini
   return result;
 }
 
+// ─── Roll-up: By Project ─────────────────────────────────────────────────────
+
+interface ProjectNode {
+  project: string;
+  metrics: RollupMetrics;
+}
+
+function buildProjectRollup(issues: NormalizedIssue[], closedStatuses: string[]): ProjectNode[] {
+  const byProject = new Map<string, NormalizedIssue[]>();
+  for (const issue of issues) {
+    const proj = issue.key.split('-')[0];
+    if (!byProject.has(proj)) byProject.set(proj, []);
+    byProject.get(proj)!.push(issue);
+  }
+
+  const result: ProjectNode[] = [];
+  for (const [project, projectIssues] of byProject) {
+    let totalEstimate = 0;
+    let completedEstimate = 0;
+    const healthCounts: HealthCounts = { red: 0, yellow: 0, green: 0 };
+    let closedCount = 0;
+    for (const issue of projectIssues) {
+      const est = typeof issue.estimate === 'number' ? issue.estimate : 0;
+      totalEstimate += est;
+      const status = issue.status as string;
+      if (closedStatuses.includes(status)) {
+        completedEstimate += est;
+        closedCount++;
+      }
+      const h = issue.healthStatus as keyof HealthCounts;
+      if (h in healthCounts) healthCounts[h]++;
+    }
+    result.push({
+      project,
+      metrics: {
+        totalEstimate,
+        completedEstimate,
+        completionPct: projectIssues.length > 0 ? Math.round((closedCount / projectIssues.length) * 1000) / 10 : 0,
+        issueCount: projectIssues.length,
+        healthCounts,
+      },
+    });
+  }
+
+  return result.sort((a, b) => a.project.localeCompare(b.project));
+}
+
 // ─── Roll-up: Parent-Child Hierarchy ─────────────────────────────────────────
 
 function buildParentChildHierarchy(issues: NormalizedIssue[], closedStatuses: string[]): HierarchyNode[] {
@@ -830,6 +902,7 @@ async function main(): Promise<void> {
   const orgRollup = buildOrgRollup(cachedIssues, config.org, config.jira.closedStatuses);
   const initiativeRollup = buildInitiativeRollup(cachedIssues, config.initiatives, config.jira.closedStatuses);
   const hierarchyRollup = buildParentChildHierarchy(cachedIssues, config.jira.closedStatuses);
+  const projectRollup = buildProjectRollup(cachedIssues, config.jira.closedStatuses);
 
   // Start Express server
   const app = express();
@@ -848,7 +921,7 @@ async function main(): Promise<void> {
   app.get('/api/data', (req: Request, res: Response) => {
     const etag = generateETag(cachedIssues);
     res.setHeader('ETag', etag);
-    res.setHeader('Cache-Control', 'public, max-age=300');
+    res.setHeader('Cache-Control', 'no-cache');
 
     if (req.headers['if-none-match'] === etag) {
       res.status(304).end();
@@ -902,6 +975,11 @@ async function main(): Promise<void> {
   // API: Parent-child hierarchy
   app.get('/api/rollup/hierarchy', (_req: Request, res: Response) => {
     res.json(hierarchyRollup);
+  });
+
+  // API: Project roll-up
+  app.get('/api/rollup/project', (_req: Request, res: Response) => {
+    res.json(projectRollup);
   });
 
   // API: CSV export
